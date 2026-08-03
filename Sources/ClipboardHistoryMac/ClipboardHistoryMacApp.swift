@@ -227,15 +227,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func openMainWindow(_ sender: Any?) {
         guard let storage, let watcher else { return }
-        NSApp.activate(ignoringOtherApps: true)
-        if let existing = mainWindowController?.window, existing.isVisible {
-            existing.makeKeyAndOrderFront(nil)
-            return
-        }
-        if mainWindowController?.window != nil {
-            mainWindowController?.window?.makeKeyAndOrderFront(nil)
+        FileHandle.standardError.write(Data("[ulw] openMainWindow entry\n".utf8))
+
+        // Reuse the existing window if it has been asked to close (isVisible false) but
+        // the controller still holds a strong reference.
+        if let existing = mainWindowController?.window {
+            if existing.isVisible {
+                FileHandle.standardError.write(Data("[ulw] reusing visible window; bringing to front\n".utf8))
+                bringWindowToFront(existing)
+                return
+            }
+            FileHandle.standardError.write(Data("[ulw] dropping stale window controller\n".utf8))
             mainWindowController = nil
-            return
+        }
+
+        // LSUIElement (= accessory) apps on macOS 14+ silently swallow
+        // `makeKeyAndOrderFront` unless we temporarily switch to `.regular`. The
+        // standard recipe is documented in TN2083.
+        let previousPolicy = NSApp.activationPolicy()
+        if previousPolicy != .regular {
+            FileHandle.standardError.write(Data("[ulw] switching activationPolicy accessory → regular\n".utf8))
+            NSApp.setActivationPolicy(.regular)
         }
 
         let host = NSHostingController(
@@ -246,13 +258,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.title = "Clipboard History"
         window.setContentSize(NSSize(width: 900, height: 600))
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.collectionBehavior.insert(.fullScreenPrimary)
+        window.collectionBehavior = [.fullScreenPrimary]
         window.isReleasedWhenClosed = false
-        window.center()
+        window.hidesOnDeactivate = false
+
+        // Center on the main NSScreen.visibleFrame; some multi-display setups
+        // have an off-main origin that puts window.center() outside the user's view.
+        let visible = NSScreen.main?.visibleFrame ?? NSScreen.main?.frame ?? .zero
+        if visible != .zero {
+            let originX = visible.midX - 450
+            let originY = visible.midY - 300
+            window.setFrameOrigin(NSPoint(x: originX, y: originY))
+        } else {
+            window.center()
+        }
+
         let wc = NSWindowController(window: window)
         wc.showWindow(nil)
+
+        // Aggressive presentation sequence — works for both .regular and
+        // accidentally-still-.accessory contexts.
+        NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+
+        FileHandle.standardError.write(Data("[ulw] window state: isVisible=\(window.isVisible) isKey=\(window.isKeyWindow) frame=\(window.frame)\n".utf8))
+
+        // macOS 14+ quirk: switching back to .accessory while the window is on
+        // screen hides it. We stay in .regular while the window is up and revert
+        // when the window closes.
+        let previousWasRegular = previousPolicy == .regular
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            if !previousWasRegular {
+                FileHandle.standardError.write(Data("[ulw] window closing; reverting activationPolicy → accessory\n".utf8))
+                NSApp.setActivationPolicy(.accessory)
+            }
+            // Drop the controller so a fresh window is built next time.
+            self.mainWindowController = nil
+        }
+
         mainWindowController = wc
+    }
+
+    private func bringWindowToFront(_ window: NSWindow) {
+        // For LSUIElement, even .regular activation policy occasionally needs a
+        // second activate() call after the window is already on screen.
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        if let frame = NSScreen.main?.visibleFrame, frame.width > 0 {
+            let targetOrigin = NSPoint(
+                x: frame.midX - window.frame.width / 2,
+                y: frame.midY - window.frame.height / 2
+            )
+            window.setFrameOrigin(targetOrigin)
+        }
+        window.orderFrontRegardless()
+        FileHandle.standardError.write(Data("[ulw] window brought to front; isVisible=\(window.isVisible)\n".utf8))
     }
 
     @objc func refreshCapture(_ sender: Any?) {

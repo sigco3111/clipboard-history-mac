@@ -113,3 +113,28 @@ final class StatusMenuContentTests: XCTestCase {
         return try String(contentsOf: url, encoding: .utf8)
     }
 }
+@MainActor
+final class ActivationPolicyTests: XCTestCase {
+
+    /// Regression-lock: AppDelegate.openMainWindow must switch NSApp activation policy
+    /// to .regular so the LSUIElement (= accessory) menu-bar app can show its main
+    /// window on macOS 14+ where accessory apps silently swallow makeKeyAndOrderFront.
+    func testAppDelegateSourceIncludesActivationPolicyRegularSwitch() throws {
+        let src = try sourceText(of: "ClipboardHistoryMacApp.swift")
+        XCTAssertTrue(src.contains("NSApp.setActivationPolicy(.regular)"),
+                      "AppDelegate.openMainWindow must call NSApp.setActivationPolicy(.regular) before showing the window")
+        XCTAssertTrue(src.contains("NSApp.setActivationPolicy(.accessory)"),
+                      "AppDelegate.openMainWindow must restore .accessory when the window closes (willCloseNotification)")
+        XCTAssertTrue(src.contains("window.makeKeyAndOrderFront"),
+                      "Window presentation path must include makeKeyAndOrderFront")
+        XCTAssertTrue(src.contains("orderFrontRegardless") || src.contains("makeKeyAndOrderFront"),
+                      "Window presentation path must include at least one make-key/order-front call")
+    }
+
+    private func sourceText(of file: String) throws -> String {
+        let here = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let root = here.deletingLastPathComponent().deletingLastPathComponent()
+        let url = root.appendingPathComponent("Sources/ClipboardHistoryMac/\(file)")
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+}
