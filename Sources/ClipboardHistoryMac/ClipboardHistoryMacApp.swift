@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -8,18 +9,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var storage: StorageManager?
     private var watcher: ClipboardWatcher?
     private var mainWindowController: NSWindowController?
+    private var statusHeaderItem: NSMenuItem?
+    private var permissionWarningItem: NSMenuItem?
+    private var refreshItem: NSMenuItem?
+    private var recentTextHeader: NSMenuItem?
+    private var recentImageHeader: NSMenuItem?
+    private var recentTextItems: [NSMenuItem] = []
+    private var recentImageItems: [NSMenuItem] = []
+    private var watcherObservation: AnyCancellable?
+    private var storageObservation: AnyCancellable?
+    private var refreshTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let storage = StorageManager()
         let watcher = ClipboardWatcher(storage: storage)
         self.storage = storage
         self.watcher = watcher
-
         installStatusMenu()
+        observeStateChanges()
+    }
+
+    private func observeStateChanges() {
+        guard let watcher, let storage else { return }
+        watcherObservation = watcher.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async { self?.refreshMenu() }
+        }
+        storageObservation = storage.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async { self?.refreshMenu() }
+        }
     }
 
     private func installStatusMenu() {
         let menu = NSMenu()
+
+        let headerItem = NSMenuItem()
+        headerItem.isEnabled = false
+        menu.addItem(headerItem)
+        self.statusHeaderItem = headerItem
+
+        let warningItem = NSMenuItem()
+        warningItem.isEnabled = false
+        warningItem.isHidden = true
+        warningItem.title = ""
+        menu.addItem(warningItem)
+        self.permissionWarningItem = warningItem
+
+        menu.addItem(NSMenuItem.separator())
+
         let openItem = NSMenuItem(
             title: "전체 히스토리 열기",
             action: #selector(openMainWindow(_:)),
@@ -28,13 +64,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         openItem.target = self
         menu.addItem(openItem)
 
+        let refreshItem = NSMenuItem(
+            title: "지금 새로 캡처",
+            action: #selector(refreshCapture(_:)),
+            keyEquivalent: ""
+        )
+        refreshItem.target = self
+        menu.addItem(refreshItem)
+        self.refreshItem = refreshItem
+
         let toggleItem = NSMenuItem(
-            title: "자동 캡처 일시정지",
+            title: watcher?.isPaused == true ? "자동 캡처 재개" : "자동 캡처 일시정지",
             action: #selector(togglePause(_:)),
             keyEquivalent: ""
         )
         toggleItem.target = self
+        toggleItem.tag = 1
         menu.addItem(toggleItem)
+        self.toggleItemRef = toggleItem
+
+        menu.addItem(NSMenuItem.separator())
+
+        let textHeader = NSMenuItem()
+        textHeader.isEnabled = false
+        textHeader.title = "최근 텍스트"
+        menu.addItem(textHeader)
+        self.recentTextHeader = textHeader
+
+        for _ in 0..<3 {
+            let item = NSMenuItem()
+            item.isEnabled = false
+            item.isHidden = true
+            menu.addItem(item)
+            self.recentTextItems.append(item)
+        }
+
+        menu.addItem(NSMenuItem.separator())
+
+        let imageHeader = NSMenuItem()
+        imageHeader.isEnabled = false
+        imageHeader.title = "최근 이미지"
+        menu.addItem(imageHeader)
+        self.recentImageHeader = imageHeader
+
+        for _ in 0..<3 {
+            let item = NSMenuItem()
+            item.isEnabled = false
+            item.isHidden = true
+            menu.addItem(item)
+            self.recentImageItems.append(item)
+        }
 
         menu.addItem(NSMenuItem.separator())
 
@@ -66,6 +145,84 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.imagePosition = NSControl.ImagePosition.imageLeft
         item.menu = menu
         self.statusItem = item
+
+        refreshMenu()
+    }
+
+    private var toggleItemRef: NSMenuItem?
+
+    private func refreshMenu() {
+        guard let watcher, let storage else { return }
+        let totalCount = storage.entries.count
+        let textCount = storage.entries.filter { $0.type == "text" }.count
+        let imageCount = storage.entries.filter { $0.type == "image" }.count
+
+        // Status bar title with count
+        if let button = statusItem?.button {
+            let title = totalCount > 0 ? "  \(totalCount)" : nil
+            button.title = title ?? ""
+        }
+
+        // Header item
+        var lines: [String] = []
+        lines.append("캡처: 총 \(totalCount)개 (텍스트 \(textCount) · 이미지 \(imageCount))")
+        if let last = watcher.lastCaptureTime {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .short
+            formatter.timeStyle = .medium
+            lines.append("마지막: \(formatter.string(from: last))")
+        } else {
+            lines.append("대기 중")
+        }
+        statusHeaderItem?.title = lines.joined(separator: "\n")
+
+        // Permission warning
+        if watcher.lastIssue == .permissionLikelyDenied {
+            permissionWarningItem?.title =
+                "⚠️ 클립보드 권한 필요 — 시스템 설정 → 개인 정보 보호 → 클립보드에서 이 앱을 허용하세요"
+            permissionWarningItem?.isHidden = false
+        } else {
+            permissionWarningItem?.isHidden = true
+        }
+
+        // Toggle item
+        if watcher.isPaused {
+            toggleItemRef?.title = "자동 캡처 재개"
+        } else {
+            toggleItemRef?.title = "자동 캡처 일시정지"
+        }
+
+        // Recent text items
+        let textEntries = storage.entries.filter { $0.type == "text" }.prefix(3)
+        for (idx, item) in recentTextItems.enumerated() {
+            if idx < textEntries.count {
+                let entry = textEntries[textEntries.count - 1 - idx]
+                item.title = String((entry.text ?? "").prefix(60))
+                item.isHidden = false
+            } else {
+                item.isHidden = true
+            }
+        }
+        recentTextHeader?.title = textEntries.isEmpty ? "최근 텍스트 (없음)" : "최근 텍스트"
+
+        // Recent image items — show count only (we don't surface image bytes in menu)
+        let imageEntries = storage.entries.filter { $0.type == "image" }.prefix(3)
+        for (idx, item) in recentImageItems.enumerated() {
+            if idx < imageEntries.count {
+                let entry = imageEntries[imageEntries.count - 1 - idx]
+                let timestamp = entry.ts
+                let formatter = DateFormatter()
+                formatter.dateStyle = .none
+                formatter.timeStyle = .short
+                let timeStr = formatter.string(from: timestamp)
+                let sizeKB = Double(entry.size) / 1024.0
+                item.title = "[\(timeStr)] \(String(format: "%.1f", sizeKB)) KB (\(entry.mime ?? "?"))"
+                item.isHidden = false
+            } else {
+                item.isHidden = true
+            }
+        }
+        recentImageHeader?.title = imageEntries.isEmpty ? "최근 이미지 (없음)" : "최근 이미지"
     }
 
     @objc func openMainWindow(_ sender: Any?) {
@@ -98,11 +255,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainWindowController = wc
     }
 
+    @objc func refreshCapture(_ sender: Any?) {
+        let pb = NSPasteboard(name: NSPasteboard.Name("ulw-fake-\(UUID().uuidString)"))
+        watcher?.processNow(pasteboard: pb)
+    }
+
     @objc func togglePause(_ sender: Any?) {
         watcher?.togglePause()
-        if let item = menu?.items.first(where: { $0.action == #selector(togglePause(_:)) }) {
-            item.title = (watcher?.isPaused ?? false) ? "자동 캡처 재개" : "자동 캡처 일시정지"
-        }
     }
 
     @objc func openGitHub(_ sender: Any?) {

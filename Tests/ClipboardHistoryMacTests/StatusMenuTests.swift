@@ -68,3 +68,48 @@ final class StatusMenuTests: XCTestCase {
         return try String(contentsOf: url, encoding: .utf8)
     }
 }
+
+@MainActor
+final class StatusMenuContentTests: XCTestCase {
+
+    /// The menu must include machine-consumed tokens: a status header, recent-text
+    /// section, and the open-full-history target/action wire. These are the surface
+    /// elements the user sees and that the closure injection path depends on.
+    func testAppDelegateSourceContainsExpectedMenuElements() throws {
+        let src = try sourceText(of: "ClipboardHistoryMacApp.swift")
+        XCTAssertTrue(src.contains("NSMenu()"),
+                      "AppDelegate must build an NSMenu programmatically")
+        XCTAssertTrue(src.contains("전체 히스토리 열기"),
+                      "Menu must include '전체 히스토리 열기' item")
+        XCTAssertTrue(src.contains("#selector(openMainWindow"),
+                      "Menu's open-full-history item must target #selector(openMainWindow(_:))")
+        XCTAssertTrue(src.contains("statusHeaderItem"),
+                      "AppDelegate must maintain a status header item")
+        XCTAssertTrue(src.contains("recentTextItems"),
+                      "AppDelegate must maintain recent-text menu slots")
+        XCTAssertTrue(src.contains("permissionWarningItem"),
+                      "AppDelegate must surface permission state in the menu")
+    }
+
+    /// The watcher must publish `lastIssue` so the menu can show '권한 필요' when reads
+    /// silently fail (the macOS 14+ TCC-denial signature).
+    func testWatcherExposesPermissionState() throws {
+        let src = try sourceText(of: "ClipboardWatcher.swift")
+        XCTAssertTrue(src.contains("@Published var lastIssue"),
+                      "ClipboardWatcher must publish a lastIssue field for UI")
+        XCTAssertTrue(src.contains("consecutiveNilReads"),
+                      "ClipboardWatcher must track consecutive unreadable changes")
+        XCTAssertTrue(src.contains("permissionLikelyDenied"),
+                      "ClipboardWatcher must include the permissionLikelyDenied case")
+    }
+
+    private func sourceText(of file: String) throws -> String {
+        let here = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+        let root = here
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let url = root.appendingPathComponent("Sources/ClipboardHistoryMac/\(file)")
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+}
