@@ -23,6 +23,7 @@ final class ClipboardWatcher: ObservableObject {
         self.storage = storage
         self.capturedCount = storage.entries.count
         self.lastChangeCount = NSPasteboard.general.changeCount
+        start()
     }
 
     /// 자동 캡처 시작
@@ -79,7 +80,7 @@ final class ClipboardWatcher: ObservableObject {
             // 중복 체크
             if hash != lastImageHash {
                 if !storage.hasImage(hash: hash) {
-                    let id = storage.addImage(data: imageData, mime: detectMime(data: imageData))
+                    _ = storage.addImage(data: imageData, mime: detectMime(data: imageData))
                     capturedCount = storage.entries.count
                     lastCaptureTime = Date()
                 }
@@ -93,7 +94,7 @@ final class ClipboardWatcher: ObservableObject {
             let hash = sha256(Data(text.utf8))
             if hash != lastTextHash {
                 if !storage.hasText(hash: hash) {
-                    let id = storage.addText(text)
+                    _ = storage.addText(text)
                     capturedCount = storage.entries.count
                     lastCaptureTime = Date()
                 }

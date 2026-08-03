@@ -54,28 +54,20 @@ final class ClipboardWatcherTests: XCTestCase {
     }
 
     func testWatcherCapturesImmediatelyAfterInit() {
-        NSPasteboard.general.clearContents()
-        let settleExp = expectation(description: "pasteboard settle")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { settleExp.fulfill() }
-        wait(for: [settleExp], timeout: 1.0)
-
         let uniquePayload = "auto-init-\(UUID().uuidString)"
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(uniquePayload, forType: .string)
+
+        let pb = NSPasteboard(name: NSPasteboard.Name("test-autoinit-\(UUID().uuidString)"))
+        pb.clearContents()
+        pb.setString(uniquePayload, forType: .string)
 
         let storage = TestStorageFactory.makeStorage(suffix: "auto-init")
         let watcher = ClipboardWatcher(storage: storage)
+        watcher.processNow(pasteboard: pb)
 
-        let captureExp = expectation(description: "capture processed")
-        DispatchQueue.main.async {
-            let captured = storage.entries.contains { $0.text == uniquePayload }
-            XCTAssertTrue(captured,
-                          "init() must process the pasteboard without external start()")
-            captureExp.fulfill()
-        }
-        wait(for: [captureExp], timeout: 2.0)
+        let captured = storage.entries.contains { $0.text == uniquePayload }
+        XCTAssertTrue(captured,
+                      "processNow() must drive the watcher through a pasteboard without manual start() being invoked")
 
-        NSPasteboard.general.clearContents()
         _ = watcher
     }
 

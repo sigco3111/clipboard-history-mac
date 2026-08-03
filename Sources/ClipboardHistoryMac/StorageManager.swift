@@ -111,11 +111,13 @@ final class StorageManager: ObservableObject {
     @discardableResult
     func addImage(data: Data, mime: String) -> Int64 {
         let hash = sha256(data)
+        if let existing = entries.first(where: { $0.type == "image" && $0.hash == hash }) {
+            return existing.id
+        }
         let ext = mimeToExt(mime)
         let filename = "\(hash).\(ext)"
         let filepath = imagesDir.appendingPathComponent(filename)
 
-        // 디스크에 저장
         try? data.write(to: filepath, options: .atomic)
 
         let id = (entries.first?.id ?? 0) + 1
@@ -126,7 +128,6 @@ final class StorageManager: ObservableObject {
         )
         entries.insert(entry, at: 0)
 
-        // 이미지 한도 초과 시 오래된 것부터 삭제
         enforceImageLimit()
 
         save()
