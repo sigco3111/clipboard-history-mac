@@ -1,0 +1,1393 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🗂️ Clipboard History — 텍스트 + 이미지 히스토리</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🗂️%3C/text%3E%3C/svg%3E" />
+  <meta name="description" content="브라우저 클립보드 히스토리 매니저 — 텍스트 + 이미지 IndexedDB 저장 + 검색/복원 + ZIP 백업" />
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --bg-elevated: #1a1d23;
+      --bg-card: #22262e;
+      --border: #2d3340;
+      --text: #e8eaed;
+      --text-dim: #9aa0a6;
+      --accent: #7cb9e8;
+      --accent-hover: #a3d2f0;
+      --danger: #ff6b6b;
+      --success: #51cf66;
+      --warn: #ffa94d;
+      --code-bg: #0a0c10;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", system-ui, sans-serif;
+      height: 100%;
+      overflow: hidden;
+    }
+    #app { display: flex; flex-direction: column; height: 100vh; }
+
+    /* ─── Header ─── */
+    header {
+      padding: 12px 20px;
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    h1 { font-size: 18px; font-weight: 700; margin: 0; letter-spacing: -0.3px; }
+    .subtitle { color: var(--text-dim); font-size: 11px; }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      background: var(--bg);
+      padding: 3px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .tab {
+      background: transparent;
+      color: var(--text-dim);
+      border: none;
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 500;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .tab.active {
+      background: var(--accent);
+      color: #0a0c10;
+      font-weight: 600;
+    }
+    .tab:not(.active):hover { color: var(--text); }
+
+    .toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    input[type=text], input[type=search] {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 10px;
+      font-size: 13px;
+      min-width: 240px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input[type=text]:focus, input[type=search]:focus {
+      border-color: var(--accent);
+    }
+    button {
+      background: var(--bg-card);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 11px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: inherit;
+    }
+    button:hover {
+      background: var(--bg-elevated);
+      border-color: var(--accent);
+      color: var(--accent-hover);
+    }
+    button.danger:hover { color: var(--danger); border-color: var(--danger); }
+    button.warn:hover { color: var(--warn); border-color: var(--warn); }
+
+    .stats { margin-left: auto; color: var(--text-dim); font-size: 11px; }
+    .stats strong { color: var(--accent); font-weight: 600; }
+
+    /* ─── Main ─── */
+    main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 20px;
+    }
+    .empty {
+      text-align: center;
+      padding: 80px 20px;
+      color: var(--text-dim);
+    }
+    .empty .icon { font-size: 56px; opacity: 0.4; margin-bottom: 16px; }
+    .empty h2 { font-size: 16px; margin: 0 0 8px; color: var(--text); font-weight: 600; }
+    .empty p { margin: 4px 0; font-size: 13px; line-height: 1.6; }
+    .empty code {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+
+    /* Text entry */
+    .entry {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 8px;
+      transition: all 0.15s;
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+    .entry:hover {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+      box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+    }
+    .entry .meta {
+      color: var(--text-dim);
+      font-size: 11px;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      white-space: nowrap;
+      min-width: 90px;
+    }
+    .entry .text {
+      flex: 1;
+      min-width: 0;
+      font-size: 13px;
+      line-height: 1.5;
+      word-break: break-all;
+      white-space: pre-wrap;
+      max-height: 120px;
+      overflow-y: auto;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    .entry .actions { display: flex; gap: 4px; flex-shrink: 0; }
+    .entry .actions button { padding: 4px 9px; font-size: 11px; }
+
+    /* Image entry */
+    .img-entry {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      margin-bottom: 8px;
+      transition: all 0.15s;
+      display: grid;
+      grid-template-columns: 120px 1fr auto;
+      gap: 12px;
+      align-items: center;
+    }
+    .img-entry:hover {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+      box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+    }
+    .img-thumb {
+      width: 120px;
+      height: 90px;
+      object-fit: contain;
+      background: var(--code-bg);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .img-info { min-width: 0; }
+    .img-info .meta {
+      color: var(--text-dim);
+      font-size: 11px;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      margin-bottom: 4px;
+    }
+    .img-info .filename {
+      font-size: 12px;
+      word-break: break-all;
+      color: var(--text);
+    }
+    .img-info .filesize {
+      color: var(--text-dim);
+      font-size: 11px;
+      margin-top: 2px;
+    }
+
+    .highlight { background: rgba(124, 185, 232, 0.3); padding: 0 2px; border-radius: 2px; }
+
+    .grant-btn {
+      background: var(--accent) !important;
+      color: #0a0c10 !important;
+      border: none !important;
+      font-weight: 600;
+      padding: 8px 14px !important;
+      margin-top: 4px;
+    }
+    .grant-btn:hover {
+      background: var(--accent-hover) !important;
+      color: #0a0c10 !important;
+    }
+    .status-warn { color: var(--warn) !important; }
+    .status-err { color: var(--danger) !important; }
+    .status-ok { color: var(--success) !important; }
+
+    /* ─── Footer ─── */
+    footer {
+      padding: 8px 20px;
+      background: var(--bg-elevated);
+      border-top: 1px solid var(--border);
+      color: var(--text-dim);
+      font-size: 11px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    .toast {
+      position: fixed;
+      bottom: 50px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--accent);
+      color: #0a0c10;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none;
+      z-index: 100;
+    }
+    .toast.show { opacity: 1; }
+    .toast.error { background: var(--danger); color: white; }
+
+    /* Modal */
+    .modal-bg {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 200;
+      cursor: pointer;
+    }
+    .modal-bg img {
+      max-width: 90vw;
+      max-height: 90vh;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div>
+        <h1>🗂️ Clipboard History</h1>
+        <div class="subtitle">텍스트 + 이미지 클립보드 히스토리</div>
+      </div>
+      <div class="tabs">
+        <button class="tab active" data-tab="text">📝 텍스트</button>
+        <button class="tab" data-tab="image">🖼️ 이미지</button>
+      </div>
+      <div class="toolbar">
+        <input id="search" type="search" placeholder="🔍 검색" />
+        <button id="capture">📋 지금 캡처</button>
+        <button id="export">💾 백업</button>
+        <button id="import">📂 복원</button>
+        <input id="importFile" type="file" accept=".json,.zip" style="display:none" />
+        <button id="clear" class="danger">🗑️ 전체 삭제</button>
+      </div>
+      <div class="stats">
+        <span id="counts"><strong>0</strong>개</span>
+        <label style="margin-left:12px; font-size:11px; color:var(--text-dim);">
+          한도:
+          <input id="imgLimit" type="number" min="10" max="500" step="10" value="100"
+            style="width:60px; padding:3px 6px; margin-left:4px;" />
+        </label>
+      </div>
+    </header>
+    <main id="entries">
+      <div class="empty" id="empty">
+        <div class="icon">📋</div>
+        <h2>아직 저장된 항목이 없어요</h2>
+        <p>아무 텍스트를 <code>Ctrl/⌘+C</code>로 복사하거나,</p>
+        <p>스크린샷을 <code>Cmd+Shift+Ctrl+3/4</code>로 캡처해보세요.</p>
+        <p style="margin-top:16px;">상단 <strong>📋 지금 캡처</strong> 버튼을 눌러 시작할 수 있어요.</p>
+        <p id="permHint" style="display:none; margin-top:14px;">
+          🔒 클립보드 읽기 권한이 필요해요.
+          <button id="grantPerm" class="grant-btn">🔓 권한 허용하고 자동 캡처 시작</button>
+          <span style="display:block; margin-top:6px; font-size:11px;">또는 아무 곳이나 한 번 클릭해도 시작돼요.</span>
+        </p>
+      </div>
+    </main>
+    <footer>
+      <span>💾 IndexedDB 로컬 저장 · 서버 전송 없음 · <a href="https://github.com/sigco3111/clipboard-history" target="_blank">GitHub</a></span>
+      <span id="autostatus" class="status-warn">⏸️ 자동 캡처 대기 중 — 📋 지금 캡처 또는 🔓 권한 허용 버튼을 눌러 시작</span>
+    </footer>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+  // ────────────────────────────────────────────
+  // IndexedDB layer (text + image stores)
+  // ────────────────────────────────────────────
+  const DB_NAME = 'clipboard-history';
+  // v0.2.6: bumped 3→4 to add a migration step that ensures the `hash` index
+  // exists on the images store for users who upgraded from v0.2.0 (where the
+  // images store already existed, so the previous v0.2.1 migration's
+  // `if (!d.objectStoreNames.contains(STORE_IMG))` block was skipped, leaving
+  // the store without the hash index). Without this fix, findByHash() throws
+  // NotFoundError on every paste / auto-capture.
+  const VERSION = 4;
+  const STORE_TEXT = 'entries';
+  const STORE_IMG = 'images';
+  const DEFAULT_IMG_LIMIT = 100;
+  let db = null;
+  let imgLimit = DEFAULT_IMG_LIMIT;
+
+  // Load limit from localStorage
+  try {
+    const saved = localStorage.getItem('clipboard-img-limit');
+    if (saved) imgLimit = parseInt(saved, 10) || DEFAULT_IMG_LIMIT;
+  } catch (e) { /* localStorage may be blocked */ }
+
+  function openDB() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, VERSION);
+      req.onupgradeneeded = (e) => {
+        const d = req.result;
+        // v0.2.6: Migration is now idempotent — for each store that already
+        // exists, also check whether each required index exists and create it
+        // if missing. This is the fix for the v0.2.1→v0.2.5 bug where users
+        // who had an images store from v0.2.0 never got the hash index added.
+        // The active upgrade transaction is exposed via e.target.transaction
+        // (the event itself is the upgradeneeded event).
+        const tx = e.target.transaction;
+        if (!d.objectStoreNames.contains(STORE_TEXT)) {
+          const s = d.createObjectStore(STORE_TEXT, { keyPath: 'id', autoIncrement: true });
+          s.createIndex('ts', 'ts', { unique: false });
+        } else {
+          const s = tx.objectStore(STORE_TEXT);
+          if (!s.indexNames.contains('ts')) s.createIndex('ts', 'ts', { unique: false });
+        }
+        if (!d.objectStoreNames.contains(STORE_IMG)) {
+          const s = d.createObjectStore(STORE_IMG, { keyPath: 'id', autoIncrement: true });
+          s.createIndex('ts', 'ts', { unique: false });
+          s.createIndex('hash', 'hash', { unique: false });
+        } else {
+          // Existing store — ensure both indexes are present.
+          const s = tx.objectStore(STORE_IMG);
+          if (!s.indexNames.contains('ts')) s.createIndex('ts', 'ts', { unique: false });
+          if (!s.indexNames.contains('hash')) s.createIndex('hash', 'hash', { unique: false });
+        }
+      };
+      req.onsuccess = () => { db = req.result; resolve(db); };
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function txStore(store, mode = 'readonly') {
+    return db.transaction(store, mode).objectStore(store);
+  }
+
+  // Text ops
+  const textApi = {
+    add(text) {
+      return new Promise((resolve, reject) => {
+        const r = txStore(STORE_TEXT, 'readwrite').add({ text, ts: Date.now() });
+        r.onsuccess = () => resolve(r.result);
+        r.onerror = () => reject(r.error);
+      });
+    },
+    all() {
+      return new Promise((resolve, reject) => {
+        const r = txStore(STORE_TEXT).getAll();
+        r.onsuccess = () => resolve(r.result || []);
+        r.onerror = () => reject(r.error);
+      });
+    },
+    delete(id) {
+      return new Promise((resolve, reject) => {
+        const r = txStore(STORE_TEXT, 'readwrite').delete(id);
+        r.onsuccess = () => resolve();
+        r.onerror = () => reject(r.error);
+      });
+    },
+    clear() {
+      return new Promise((resolve, reject) => {
+        const r = txStore(STORE_TEXT, 'readwrite').clear();
+        r.onsuccess = () => resolve();
+        r.onerror = () => reject(r.error);
+      });
+    },
+    put(entry) {
+      return new Promise((resolve, reject) => {
+        const r = txStore(STORE_TEXT, 'readwrite').put(entry);
+        r.onsuccess = () => resolve();
+        r.onerror = () => reject(r.error);
+      });
+    },
+  };
+
+  // Image ops
+  const imgApi = {
+    add(blob, filename, mimeType, hash) {
+      return new Promise((resolve, reject) => {
+        const r = txStore(STORE_IMG, 'readwrite').add({
+          blob, filename, mimeType, ts: Date.now(), size: blob.size, hash: hash || '',
+        });
+        r.onsuccess = () => resolve(r.result);
+        r.onerror = () => reject(r.error);
+      });
+    },
+    findByHash(hash) {
+      return new Promise((resolve) => {
+        if (!hash) return resolve(null);
+        // Defensive: in rare cases (legacy DB before the v0.2.6 migration
+        // ran, or a race during upgrade) the `hash` index may not exist.
+        // Don't throw — return null so processImageCapture can treat the
+        // image as new (correct behavior). Log a warning so the user can
+        // diagnose if needed.
+        let store;
+        try {
+          store = txStore(STORE_IMG).index('hash');
+        } catch (e) {
+          console.warn('[findByHash] hash index missing, treating as new image:', e.message);
+          return resolve(null);
+        }
+        const r = store.get(hash);
+        r.onsuccess = () => resolve(r.result || null);
+        r.onerror = () => { console.warn('[findByHash] get failed:', r.error); resolve(null); };
+      });
+    },
+    updateTimestamp(id) {
+      return new Promise((resolve, reject) => {
+        const getReq = txStore(STORE_IMG).get(id);
+        getReq.onsuccess = () => {
+          const entry = getReq.result;
+          if (!entry) return resolve();
+          entry.ts = Date.now();
+          const putReq = txStore(STORE_IMG, 'readwrite').put(entry);
+          putReq.onsuccess = () => resolve();
+          putReq.onerror = () => reject(putReq.error);
+        };
+        getReq.onerror = () => reject(getReq.error);
+      });
+    },
+    all() {
+      return new Promise((resolve, reject) => {
+        const r = txStore(STORE_IMG).getAll();
+        r.onsuccess = () => resolve(r.result || []);
+        r.onerror = () => reject(r.error);
+      });
+    },
+    delete(id) {
+      return new Promise((resolve, reject) => {
+        const r = txStore(STORE_IMG, 'readwrite').delete(id);
+        r.onsuccess = () => resolve();
+        r.onerror = () => reject(r.error);
+      });
+    },
+    clear() {
+      return new Promise((resolve, reject) => {
+        const r = txStore(STORE_IMG, 'readwrite').clear();
+        r.onsuccess = () => resolve();
+        r.onerror = () => reject(r.error);
+      });
+    },
+    get(id) {
+      return new Promise((resolve, reject) => {
+        const r = txStore(STORE_IMG).get(id);
+        r.onsuccess = () => resolve(r.result);
+        r.onerror = () => reject(r.error);
+      });
+    },
+  };
+
+  // ────────────────────────────────────────────
+  // UI helpers
+  // ────────────────────────────────────────────
+  const $ = (id) => document.getElementById(id);
+  let lastText = '';
+  let lastImageHash = '';
+  let currentTab = 'text';
+
+  // Supported image MIME types + canonical file extension
+  const SUPPORTED_IMG_MIMES = {
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'image/bmp': 'bmp',
+    'image/x-bmp': 'bmp',
+  };
+  const IMG_POLL_ORDER = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/bmp'];
+
+  // ────────────────────────────────────────────
+  // Image hash + auto-limit helpers
+  // ────────────────────────────────────────────
+
+  // SHA-256 hash via SubtleCrypto (fast, native)
+  async function computeHash(blob) {
+    try {
+      const buf = await blob.arrayBuffer();
+      const hashBuf = await crypto.subtle.digest('SHA-256', buf);
+      const arr = Array.from(new Uint8Array(hashBuf));
+      return arr.map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch (e) {
+      // Fallback: simple size+type-based pseudo-hash
+      return `${blob.size}-${blob.type}-${Date.now()}`;
+    }
+  }
+
+  // Enforce image count limit — delete oldest first
+  async function enforceImageLimit() {
+    const all = await imgApi.all();
+    if (all.length <= imgLimit) return 0;
+    // Sort by ts ascending (oldest first)
+    all.sort((a, b) => a.ts - b.ts);
+    const toDelete = all.slice(0, all.length - imgLimit);
+    for (const e of toDelete) {
+      await imgApi.delete(e.id);
+    }
+    return toDelete.length;
+  }
+
+  function toast(msg, isError = false) {
+    const el = $('toast');
+    el.textContent = msg;
+    el.classList.toggle('error', isError);
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), 1800);
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+
+  function fmtTime(ts) {
+    const d = new Date(ts);
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
+  function fmtBytes(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    return (n / 1024 / 1024).toFixed(2) + ' MB';
+  }
+
+  function highlight(text, query) {
+    if (!query) return escapeHtml(text);
+    const safe = escapeHtml(text);
+    const safeQ = escapeHtml(query).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return safe.replace(new RegExp(safeQ, 'gi'), m => `<span class="highlight">${m}</span>`);
+  }
+
+  // ────────────────────────────────────────────
+  // Render: text tab
+  // ────────────────────────────────────────────
+  let allText = [];
+  let searchQuery = '';
+  let searchTimer = null;
+
+  async function refreshText() {
+    allText = await textApi.all();
+    allText.sort((a, b) => b.ts - a.ts);
+    if (currentTab === 'text') renderCurrent();
+  }
+
+  function applyTextFilter() {
+    if (!searchQuery) return renderText(allText);
+    const q = searchQuery.toLowerCase();
+    const filtered = allText.filter(e => e.text.toLowerCase().includes(q));
+    renderText(filtered, searchQuery);
+  }
+
+  function renderText(entries, query = '') {
+    const container = $('entries');
+    if (entries.length === 0) {
+      container.innerHTML = `
+        <div class="empty">
+          <div class="icon">📋</div>
+          <h2>${query ? '검색 결과가 없어요' : '아직 텍스트 항목이 없어요'}</h2>
+          <p>${query ? `"${escapeHtml(query)}"에 매칭되는 항목이 없습니다.` : '아무 텍스트를 <code>Ctrl/⌘+C</code>로 복사하거나,'}</p>
+          ${!query && '<p>상단 <strong>📋 지금 캡처</strong> 버튼을 눌러보세요.</p>'}
+        </div>`;
+    } else {
+      const html = entries.map(e => `
+        <div class="entry" data-id="${e.id}">
+          <div class="meta">${fmtTime(e.ts)}</div>
+          <div class="text">${highlight(e.text, query)}</div>
+          <div class="actions">
+            <button data-act="copy-text" data-id="${e.id}">📋 복사</button>
+            <button data-act="del-text" data-id="${e.id}" class="danger">🗑️</button>
+          </div>
+        </div>
+      `).join('');
+      container.innerHTML = html;
+    }
+    updateCounts();
+  }
+
+  // ────────────────────────────────────────────
+  // Render: image tab
+  // ────────────────────────────────────────────
+  let allImg = [];
+
+  async function refreshImg() {
+    allImg = await imgApi.all();
+    allImg.sort((a, b) => b.ts - a.ts);
+    if (currentTab === 'image') renderCurrent();
+  }
+
+  let imgUrlsToRevoke = [];
+
+  function renderImg(entries, query = '') {
+    const container = $('entries');
+    // Revoke old object URLs
+    imgUrlsToRevoke.forEach(url => URL.revokeObjectURL(url));
+    imgUrlsToRevoke = [];
+
+    if (entries.length === 0) {
+      container.innerHTML = `
+        <div class="empty">
+          <div class="icon">🖼️</div>
+          <h2>${query ? '검색 결과가 없어요' : '아직 이미지 항목이 없어요'}</h2>
+          <p>${query ? `"${escapeHtml(query)}"에 매칭되는 이미지가 없습니다.` : 'macOS에서 <code>Cmd+Shift+Ctrl+3/4</code>로 스크린샷 캡처,'}</p>
+          ${!query && '<p>또는 이미지 복사 후 상단 <strong>📋 지금 캡처</strong> 버튼을 눌러보세요.</p>'}
+          <p id="permHintImg" style="display:none; margin-top:14px;">
+            🔒 클립보드 읽기 권한이 필요해요.
+            <button id="grantPermImg" class="grant-btn">🔓 권한 허용하고 자동 캡처 시작</button>
+            <span style="display:block; margin-top:6px; font-size:11px;">또는 상단 <strong>📋 지금 캡처</strong> 버튼을 눌러도 돼요.</span>
+          </p>
+        </div>`;
+    } else {
+      const html = entries.map(e => {
+        const url = URL.createObjectURL(e.blob);
+        imgUrlsToRevoke.push(url);
+        const filename = e.filename || `image-${e.id}.png`;
+        const matches = query ? filename.toLowerCase().includes(query.toLowerCase()) : true;
+        return `
+        <div class="img-entry" data-id="${e.id}">
+          <img class="img-thumb" src="${url}" data-act="view-img" data-id="${e.id}" alt="${escapeHtml(filename)}" />
+          <div class="img-info">
+            <div class="meta">${fmtTime(e.ts)}</div>
+            <div class="filename">${highlight(filename, query)}</div>
+            <div class="filesize">${escapeHtml(e.mimeType)} · ${fmtBytes(e.size)}</div>
+          </div>
+          <div class="actions" style="display:flex; flex-direction:column; gap:4px;">
+            <button data-act="copy-img" data-id="${e.id}">📋 복사</button>
+            <button data-act="save-img" data-id="${e.id}">💾 저장</button>
+            <button data-act="del-img" data-id="${e.id}" class="danger">🗑️</button>
+          </div>
+        </div>
+      `;
+      }).join('');
+      container.innerHTML = html;
+    }
+    updateCounts();
+  }
+
+  function renderCurrent() {
+    if (currentTab === 'text') applyTextFilter();
+    else applyImgFilter();
+  }
+
+  function applyImgFilter() {
+    if (!searchQuery) return renderImg(allImg);
+    const q = searchQuery.toLowerCase();
+    const filtered = allImg.filter(e =>
+      (e.filename || '').toLowerCase().includes(q));
+    renderImg(filtered, searchQuery);
+  }
+
+  function updateCounts() {
+    if (currentTab === 'text') {
+      $('counts').innerHTML = `<strong>${allText.length.toLocaleString()}</strong> 텍스트`;
+    } else {
+      const totalSize = allImg.reduce((sum, e) => sum + e.size, 0);
+      $('counts').innerHTML = `<strong>${allImg.length.toLocaleString()}</strong> 이미지 · ${fmtBytes(totalSize)}`;
+    }
+  }
+
+  // ────────────────────────────────────────────
+  // Tab switching
+  // ────────────────────────────────────────────
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      currentTab = tab.dataset.tab;
+      renderCurrent();
+    });
+  });
+
+  // ────────────────────────────────────────────
+  // Search (debounced)
+  // ────────────────────────────────────────────
+  $('search').addEventListener('input', (e) => {
+    clearTimeout(searchTimer);
+    searchQuery = e.target.value.trim();
+    searchTimer = setTimeout(() => renderCurrent(), 150);
+  });
+
+  // ────────────────────────────────────────────
+  // Clipboard capture
+  // ────────────────────────────────────────────
+  async function captureNow() {
+    // Mark this as an explicit user action so setStatus can protect the
+    // resulting message from auto-poll overwrites for EXPLICIT_LOCK_MS.
+    lastExplicitAt = Date.now();
+    return pollOnce({ explicit: true, source: 'capture-button' }).then((r) => {
+      if (r.state === 'ok' || r.state === 'hidden') {
+        if (!autoTimer) startAutoCapture();
+      }
+    });
+  }
+
+  async function processTextCapture(text) {
+    text = (text || '').trim();
+    if (!text) return;
+    if (text === lastText) return;
+    lastText = text;
+
+    const recent = await textApi.all();
+    const dup = recent.slice(0, 100).find(e => e.text === text);
+    if (dup) {
+      dup.ts = Date.now();
+      await textApi.put(dup);
+    } else {
+      await textApi.add(text);
+    }
+    await refreshText();
+    toast('📝 텍스트 캡처 완료');
+  }
+
+  async function processImageCapture(blob, mime) {
+    if (!blob || blob.size === 0) return;
+    try {
+      // Compute hash for dedup
+      const hash = await computeHash(blob);
+      // Dedup by hash (same as lastImageHash = no change since last poll)
+      if (hash === lastImageHash) return;
+      // Check IndexedDB for existing entry with same hash
+      const existing = await imgApi.findByHash(hash);
+      const finalMime = mime || blob.type || 'image/png';
+      const ext = SUPPORTED_IMG_MIMES[finalMime] || (finalMime.split('/')[1] || 'png');
+      if (existing) {
+        // Move to top (update timestamp) — image still in clipboard
+        await imgApi.updateTimestamp(existing.id);
+        lastImageHash = hash;
+        await refreshImg();
+        return;
+      }
+      lastImageHash = hash;
+      // Add new image
+      const filename = `clipboard-${Date.now()}.${ext}`;
+      await imgApi.add(blob, filename, finalMime, hash);
+      // Enforce count limit — delete oldest if over limit
+      const deleted = await enforceImageLimit();
+      await refreshImg();
+      if (deleted > 0) {
+        toast(`🖼️ 캡처 (${fmtBytes(blob.size)}) · 🧹 ${deleted}개 오래된 이미지 정리됨`);
+      } else {
+        toast(`🖼️ 이미지 캡처 (${fmtBytes(blob.size)})`);
+      }
+    } catch (e) {
+      // v0.2.6: top-level safety net — any future bug in capture (e.g.,
+      // another schema drift) must not silently lose the image. Log it,
+      // fall back to saving without the hash index.
+      console.error('[processImageCapture] failed:', e);
+      try {
+        const finalMime = mime || blob.type || 'image/png';
+        const ext = SUPPORTED_IMG_MIMES[finalMime] || (finalMime.split('/')[1] || 'png');
+        const filename = `clipboard-${Date.now()}.${ext}`;
+        // Try add with empty hash (no dedup) so the image is still saved
+        await imgApi.add(blob, filename, finalMime, '');
+        await refreshImg();
+        toast('🖼️ 이미지 캡처 (fallback 저장)');
+      } catch (fallbackErr) {
+        console.error('[processImageCapture] fallback also failed:', fallbackErr);
+        toast('⛔ 이미지 저장 실패: ' + (fallbackErr.message || e.message), true);
+      }
+    }
+  }
+
+  // ────────────────────────────────────────────
+  // Auto-capture (2s polling for text + image)
+  // ────────────────────────────────────────────
+  let autoTimer = null;
+  let permissionState = 'pending'; // 'pending' | 'granted' | 'denied' | 'unsupported'
+  let pollInFlight = false;
+  let lastPollAt = 0;
+  let lastPollFound = ''; // e.g. 'image/png x2' or 'text' or 'empty'
+  let pollCount = 0;
+  // v0.2.7: track the last explicit user action (button click, grant button).
+  // For 2.5s afterwards, setStatus is "locked" — auto-poll can't overwrite the
+  // message. This prevents the user from seeing a flash of RED followed by
+  // YELLOW when they click [지금 캡처] and permission is denied.
+  let lastExplicitAt = 0;
+  const EXPLICIT_LOCK_MS = 2500;
+  // Debug mode — set localStorage.clipboard-debug='1' to enable verbose console logs
+  let debugMode = false;
+  try { debugMode = localStorage.getItem('clipboard-debug') === '1'; } catch (e) {}
+
+  function setStatus(text, kind, opts = {}) {
+    const el = $('autostatus');
+    if (!el) return;
+    // v0.2.7: when an explicit user action just set the status, don't let
+    // an auto-poll fire overwrite it. The user's last visible feedback
+    // (RED/denied or GREEN/granted) must persist long enough to be read.
+    if (!opts.force && !opts.explicit) {
+      if (lastExplicitAt && Date.now() - lastExplicitAt < EXPLICIT_LOCK_MS) {
+        if (debugMode) console.log('[status] locked (recent explicit), skip:', text);
+        return;
+      }
+    }
+    el.textContent = text;
+    el.classList.remove('status-ok', 'status-warn', 'status-err');
+    if (kind === 'ok') el.classList.add('status-ok');
+    else if (kind === 'err') el.classList.add('status-err');
+    else el.classList.add('status-warn');
+  }
+
+  // One poll cycle — read clipboard, dispatch to image or text handler.
+  // Returns { state, reason } for the status indicator.
+  // Auto-poll must NEVER call read() before the user has explicitly granted
+  // permission (via requestPermission or captureNow), otherwise the browser
+  // throws NotAllowedError and the user sees a phantom "denied" state.
+  // On error, auto-poll stays silent — the user hasn't done anything yet.
+  async function pollOnce(opts = {}) {
+    const { explicit = false, source = 'timer' } = opts;
+    if (pollInFlight) {
+      if (debugMode) console.log('[poll] skipped (in-flight)');
+      return { state: 'busy' };
+    }
+    if (document.hidden) {
+      setStatus('⏸️ 자동 캡처 일시정지 (탭 비활성)', 'warn');
+      return { state: 'hidden' };
+    }
+    if (!navigator.clipboard || !navigator.clipboard.read) {
+      setStatus('⚠️ 이 브라우저는 Clipboard API 미지원', 'err');
+      permissionState = 'unsupported';
+      return { state: 'unsupported' };
+    }
+    // Auto-poll gate: only read if permission has been granted, OR if this
+    // is an explicit user action (captureNow / requestPermission).
+    if (!explicit && permissionState !== 'granted') {
+      if (debugMode) console.log('[poll] skipped (no permission, source=' + source + ')');
+      return { state: 'pending' };
+    }
+    pollInFlight = true;
+    pollCount++;
+    const t0 = Date.now();
+    if (debugMode) console.log(`[poll] #${pollCount} start (source=${source}, explicit=${explicit})`);
+    try {
+      const items = await navigator.clipboard.read();
+      permissionState = 'granted';
+      let capturedImage = false;
+      let foundTypes = [];
+      for (const item of items) {
+        for (const t of item.types) if (!foundTypes.includes(t)) foundTypes.push(t);
+        for (const mime of IMG_POLL_ORDER) {
+          if (item.types.includes(mime)) {
+            try {
+              const blob = await item.getType(mime);
+              if (blob && blob.size > 0) {
+                await processImageCapture(blob, mime);
+                capturedImage = true;
+              }
+            } catch (innerErr) {
+              if (debugMode) console.warn(`[poll] getType(${mime}) failed:`, innerErr.message);
+            }
+            if (capturedImage) break;
+          }
+        }
+        if (capturedImage) break;
+      }
+      if (!capturedImage) {
+        // No image → try text. Use readText only if no read() permission to begin with.
+        try {
+          const text = await navigator.clipboard.readText();
+          if (text) {
+            await processTextCapture(text);
+            lastPollFound = 'text (' + text.length + '자)';
+          } else {
+            lastPollFound = 'empty';
+          }
+        } catch (txtErr) {
+          // readText may throw NotAllowedError if only read() was granted — silent.
+          lastPollFound = 'empty';
+        }
+      } else {
+        lastPollFound = 'image: ' + foundTypes.filter(t => t.startsWith('image/')).join(',');
+      }
+      lastPollAt = Date.now();
+      const dt = lastPollAt - t0;
+      if (debugMode) console.log(`[poll] #${pollCount} ok in ${dt}ms — found=${lastPollFound}`);
+      // On explicit success, also set lastExplicitAt so the lock keeps the
+      // green status visible long enough to read.
+      if (explicit) lastExplicitAt = Date.now();
+      setStatus(formatActiveStatus(), 'ok', { explicit });
+      window.__lastPollAt = lastPollAt;
+      return { state: 'ok' };
+    } catch (e) {
+      const name = e && e.name;
+      if (name === 'NotAllowedError') {
+        permissionState = 'denied';
+        if (explicit) {
+          lastExplicitAt = Date.now();
+          setStatus('⛔ 클립보드 읽기 권한 거부됨 — 브라우저에서 이 사이트의 클립보드 권한을 허용해주세요', 'err', { explicit: true });
+          showPermissionHint(true);
+        } else {
+          // Auto-poll NotAllowedError AFTER permission was granted — this is
+          // a session timeout. Show a clearer, more actionable message.
+          if (lastExplicitAt) {
+            setStatus('🔄 권한 세션 만료 — 📋 지금 캡처 또는 페이지를 한 번 클릭해주세요', 'warn');
+          } else {
+            setStatus('⏸️ 자동 캡처 일시 대기 — 📋 지금 캡처 또는 권한 허용이 필요해요', 'warn');
+          }
+        }
+        if (debugMode) console.warn('[poll] NotAllowedError (source=' + source + ')', e.message);
+        return { state: 'denied' };
+      }
+      if (name === 'DataError' || name === 'NotFoundError') {
+        lastPollAt = Date.now();
+        lastPollFound = 'empty';
+        setStatus(formatActiveStatus(), 'ok');
+        window.__lastPollAt = lastPollAt;
+        return { state: 'ok' };
+      }
+      setStatus('⚠️ 자동 캡처 일시 오류: ' + (e && e.message ? e.message : name || 'unknown'), 'err');
+      console.error('[poll] error:', e);
+      return { state: 'error', reason: name };
+    } finally {
+      pollInFlight = false;
+    }
+  }
+
+  function formatActiveStatus() {
+    if (!lastPollAt) return '🟢 자동 캡처 활성';
+    const ago = Math.max(0, Math.floor((Date.now() - lastPollAt) / 1000));
+    if (ago < 60) {
+      return lastPollFound && lastPollFound !== 'empty'
+        ? `🟢 자동 캡처 활성 · ${ago}초 전 (${lastPollFound})`
+        : `🟢 자동 캡처 활성 · ${ago}초 전`;
+    }
+    return `🟢 자동 캡처 활성 · ${Math.floor(ago / 60)}분 전`;
+  }
+
+  function showPermissionHint(show) {
+    const hint = $('permHint');
+    if (hint) hint.style.display = show ? 'block' : 'none';
+    // Image tab has its own permHint in renderImg's empty state
+    const hintImg = $('permHintImg');
+    if (hintImg) hintImg.style.display = show ? 'block' : 'none';
+    const grantBtnImg = $('grantPermImg');
+    if (grantBtnImg && !grantBtnImg.dataset.wired) {
+      grantBtnImg.dataset.wired = '1';
+      grantBtnImg.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        await requestPermission();
+      });
+    }
+  }
+
+  async function requestPermission() {
+    lastExplicitAt = Date.now();
+    try {
+      // Trigger a read so the browser shows its prompt if not yet decided.
+      const items = await navigator.clipboard.read();
+      // If we got here, permission is granted.
+      permissionState = 'granted';
+      showPermissionHint(false);
+      setStatus('🟢 권한 허용됨', 'ok', { explicit: true });
+      // Process what we just read
+      await pollOnce({ explicit: true, source: 'grant-button' });
+      // Start the auto-capture loop now that permission is confirmed.
+      startAutoCapture();
+      return true;
+    } catch (e) {
+      if (e && e.name === 'NotAllowedError') {
+        permissionState = 'denied';
+        setStatus('⛔ 권한 거부됨 — 브라우저 설정에서 이 사이트의 클립보드 권한을 허용해주세요', 'err', { explicit: true });
+        showPermissionHint(true);
+        return false;
+      }
+      setStatus('⚠️ 권한 확인 실패: ' + (e.message || e.name), 'err', { explicit: true });
+      return false;
+    }
+  }
+
+  function startAutoCapture() {
+    if (autoTimer) return;
+    // 1s polling — faster detection for screenshots and rapid clipboard changes.
+    autoTimer = setInterval(pollOnce, 1000);
+  }
+
+  // Handle a paste event — extract the first image blob and capture it.
+  async function handlePasteEvent(e) {
+    try {
+      const dt = e && (e.clipboardData || e.originalEvent && e.originalEvent.clipboardData);
+      if (!dt) return;
+      // Prefer DataTransfer.files; fall back to items
+      let blob = null;
+      let mime = '';
+      if (dt.files && dt.files.length > 0) {
+        for (const f of dt.files) {
+          if (f.type && SUPPORTED_IMG_MIMES[f.type]) { blob = f; mime = f.type; break; }
+        }
+      }
+      if (!blob && dt.items) {
+        for (const it of dt.items) {
+          if (it.kind === 'file' && it.type && SUPPORTED_IMG_MIMES[it.type]) {
+            blob = it.getAsFile ? it.getAsFile() : null;
+            mime = it.type;
+            if (blob) break;
+          }
+        }
+      }
+      if (!blob) return;
+      // Note: processImageCapture dedupes via hash, so duplicate pastes
+      // (e.g., paste then 2s-poll) will only save once.
+      await processImageCapture(blob, mime);
+    } catch (err) {
+      console.error('[paste]', err);
+    }
+  }
+
+  $('capture').addEventListener('click', captureNow);
+
+  // ────────────────────────────────────────────
+  // Entry actions (delegation)
+  // ────────────────────────────────────────────
+  $('entries').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-act]');
+    const img = e.target.closest('img[data-act]');
+
+    if (btn) {
+      const id = Number(btn.dataset.id);
+      const act = btn.dataset.act;
+
+      if (act === 'copy-text') {
+        const entry = allText.find(x => x.id === id);
+        if (entry) {
+          try {
+            await navigator.clipboard.writeText(entry.text);
+            toast('📋 텍스트 복사됨');
+          } catch (err) {
+            toast('복사 실패', true);
+          }
+        }
+      } else if (act === 'del-text') {
+        if (!confirm('이 텍스트 항목을 삭제할까요?')) return;
+        await textApi.delete(id);
+        await refreshText();
+        toast('삭제 완료');
+      } else if (act === 'copy-img') {
+        const entry = allImg.find(x => x.id === id);
+        if (entry) {
+          try {
+            await navigator.clipboard.write([
+              new ClipboardItem({ [entry.mimeType]: entry.blob }),
+            ]);
+            toast('🖼️ 이미지 복사됨');
+          } catch (err) {
+            toast('이미지 복사 실패 — Chrome/Edge/Safari 권장', true);
+          }
+        }
+      } else if (act === 'save-img') {
+        const entry = allImg.find(x => x.id === id);
+        if (entry) {
+          const url = URL.createObjectURL(entry.blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = entry.filename || `image-${entry.id}.png`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          toast('💾 저장 완료');
+        }
+      } else if (act === 'del-img') {
+        if (!confirm('이 이미지 항목을 삭제할까요?')) return;
+        await imgApi.delete(id);
+        await refreshImg();
+        toast('삭제 완료');
+      }
+    } else if (img && img.dataset.act === 'view-img') {
+      const id = Number(img.dataset.id);
+      const entry = allImg.find(x => x.id === id);
+      if (entry) {
+        const url = URL.createObjectURL(entry.blob);
+        const bg = document.createElement('div');
+        bg.className = 'modal-bg';
+        const modalImg = document.createElement('img');
+        modalImg.src = url;
+        bg.appendChild(modalImg);
+        bg.addEventListener('click', () => {
+          URL.revokeObjectURL(url);
+          bg.remove();
+        });
+        document.body.appendChild(bg);
+      }
+    }
+  });
+
+  // ────────────────────────────────────────────
+  // Export: text JSON + image ZIP
+  // ────────────────────────────────────────────
+  $('export').addEventListener('click', async () => {
+    try {
+      const ts = new Date().toISOString().slice(0, 10);
+      // Always export text JSON
+      const textEntries = await textApi.all();
+      const textBlob = new Blob([JSON.stringify({
+        type: 'text',
+        version: 1,
+        exported_at: new Date().toISOString(),
+        count: textEntries.length,
+        entries: textEntries,
+      }, null, 2)], { type: 'application/json' });
+
+      if (typeof JSZip === 'undefined') {
+        // JSZip not loaded — just export text
+        downloadBlob(textBlob, `clipboard-text-${ts}.json`);
+        toast(`${textEntries.length} 텍스트 내보냄 (이미지는 JSZip 미로드)`);
+        return;
+      }
+
+      const zip = new JSZip();
+      zip.file(`text-${ts}.json`, textBlob);
+
+      const imgEntries = await imgApi.all();
+      if (imgEntries.length > 0) {
+        const imgFolder = zip.folder(`images-${ts}`);
+        const manifest = [];
+        for (const e of imgEntries) {
+          const ext = (e.mimeType || 'image/png').split('/')[1] || 'png';
+          const filename = `${e.id}-${e.filename || `image.${ext}`}`;
+          imgFolder.file(filename, e.blob);
+          manifest.push({
+            id: e.id,
+            filename,
+            original_name: e.filename,
+            mimeType: e.mimeType,
+            size: e.size,
+            ts: e.ts,
+          });
+        }
+        zip.file(`images-${ts}-manifest.json`, JSON.stringify({
+          type: 'images-manifest',
+          version: 1,
+          count: imgEntries.length,
+          images: manifest,
+        }, null, 2));
+      }
+
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      downloadBlob(zipBlob, `clipboard-backup-${ts}.zip`);
+      toast(`${textEntries.length} 텍스트 + ${imgEntries.length} 이미지 백업 완료`);
+    } catch (e) {
+      toast('백업 실패: ' + e.message, true);
+      console.error(e);
+    }
+  });
+
+  function downloadBlob(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // ────────────────────────────────────────────
+  // Import: text JSON or ZIP backup
+  // ────────────────────────────────────────────
+  $('import').addEventListener('click', () => $('importFile').click());
+  $('importFile').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      if (file.name.endsWith('.zip')) {
+        await importZip(file);
+      } else {
+        await importTextJson(file);
+      }
+    } catch (err) {
+      toast('가져오기 실패: ' + err.message, true);
+      console.error(err);
+    } finally {
+      e.target.value = '';
+    }
+  });
+
+  async function importTextJson(file) {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    const entries = data.entries || [];
+    if (!Array.isArray(entries)) throw new Error('형식 오류');
+    const existing = await textApi.all();
+    const existingSet = new Set(existing.map(x => x.text));
+    let added = 0;
+    for (const e of entries) {
+      if (typeof e.text === 'string' && !existingSet.has(e.text)) {
+        await textApi.add(e.text);
+        added++;
+      }
+    }
+    await refreshText();
+    toast(`${added}개 텍스트 가져옴 (중복 ${entries.length - added}개 스킵)`);
+  }
+
+  async function importZip(file) {
+    if (typeof JSZip === 'undefined') throw new Error('JSZip 미로드');
+    const zip = await JSZip.loadAsync(file);
+    let textAdded = 0, imgAdded = 0;
+
+    // Text JSON
+    const textFiles = Object.keys(zip.files).filter(n => n.startsWith('text-') && n.endsWith('.json'));
+    for (const name of textFiles) {
+      const jsonText = await zip.files[name].async('text');
+      const data = JSON.parse(jsonText);
+      const entries = data.entries || [];
+      const existing = await textApi.all();
+      const existingSet = new Set(existing.map(x => x.text));
+      for (const e of entries) {
+        if (typeof e.text === 'string' && !existingSet.has(e.text)) {
+          await textApi.add(e.text);
+          textAdded++;
+        }
+      }
+    }
+
+    // Images manifest
+    const manifestFiles = Object.keys(zip.files).filter(n => n.includes('manifest') && n.endsWith('.json'));
+    for (const mName of manifestFiles) {
+      const manifestText = await zip.files[mName].async('text');
+      const manifest = JSON.parse(manifestText);
+      const folderName = mName.replace('-manifest.json', '');
+      for (const img of (manifest.images || [])) {
+        const fullName = `${folderName}/${img.filename}`;
+        const zipEntry = zip.files[fullName];
+        if (!zipEntry) continue;
+        const blob = await zipEntry.async('blob');
+        await imgApi.add(blob, img.original_name || img.filename, img.mimeType || 'image/png');
+        imgAdded++;
+      }
+    }
+
+    await refreshText();
+    await refreshImg();
+    toast(`복원 완료 — 텍스트 ${textAdded}개, 이미지 ${imgAdded}개`);
+  }
+
+  $('clear').addEventListener('click', async () => {
+    if (currentTab === 'text') {
+      if (!confirm(`텍스트 항목 전체를 삭제할까요? (되돌릴 수 없음)`)) return;
+      await textApi.clear();
+      lastText = '';
+      await refreshText();
+      toast('텍스트 전체 삭제');
+    } else {
+      if (!confirm(`이미지 항목 전체를 삭제할까요? (되돌릴 수 없음)`)) return;
+      await imgApi.clear();
+      await refreshImg();
+      toast('이미지 전체 삭제');
+    }
+  });
+
+  // ────────────────────────────────────────────
+  // Init
+  // ────────────────────────────────────────────
+  // Image limit input handler
+  $('imgLimit').addEventListener('change', async (e) => {
+    const val = parseInt(e.target.value, 10);
+    if (val >= 10 && val <= 500) {
+      imgLimit = val;
+      try { localStorage.setItem('clipboard-img-limit', String(val)); } catch {}
+      const deleted = await enforceImageLimit();
+      await refreshImg();
+      if (deleted > 0) {
+        toast(`🧹 한도 ${val}개 적용 · ${deleted}개 정리됨`);
+      } else {
+        toast(`한도 ${val}개로 설정됨`);
+      }
+    }
+  });
+
+  (async () => {
+    try {
+      await openDB();
+      // Enforce limit on load (in case legacy data exceeds limit)
+      const deleted = await enforceImageLimit();
+      if (deleted > 0) {
+        setTimeout(() => toast(`🧹 시작 시 ${deleted}개 오래된 이미지 정리됨`), 500);
+      }
+      await refreshText();
+      await refreshImg();
+      // Set limit input to current value
+      $('imgLimit').value = imgLimit;
+
+      // Auto-capture is intentionally NOT started on any document click — a
+      // random click (e.g. tab switch, hover) doesn't grant clipboard read
+      // permission on macOS Safari and would only trigger a phantom
+      // "NotAllowedError". Instead, auto-capture starts only after the user
+      // explicitly grants permission via captureNow() or requestPermission().
+
+      // Paste / visibility / focus / mousedown / keydown / copy listeners
+      // are registered unconditionally — they don't require clipboard-read
+      // permission. paste events deliver the data directly via clipboardData;
+      // the others trigger pollOnce() which is itself gated on
+      // permissionState === 'granted'.
+      document.addEventListener('paste', handlePasteEvent);
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) pollOnce({ source: 'visibilitychange' });
+      });
+      window.addEventListener('focus', () => pollOnce({ source: 'focus' }));
+      // Debounced activity triggers — any user activity on the page
+      // (mousedown, keydown) or a copy event gives an immediate poll chance
+      // without waiting for the 1s tick. Debounce 300ms to avoid spam.
+      let activityDebounce = null;
+      function debouncedActivityPoll() {
+        if (activityDebounce) return;
+        activityDebounce = setTimeout(() => {
+          activityDebounce = null;
+          pollOnce({ source: 'activity' });
+        }, 300);
+      }
+      document.addEventListener('mousedown', debouncedActivityPoll, true);
+      document.addEventListener('keydown', debouncedActivityPoll, true);
+      document.addEventListener('copy', debouncedActivityPoll, true);
+
+      // Explicit "권한 허용" button in the empty card.
+      const grantBtn = $('grantPerm');
+      if (grantBtn) {
+        grantBtn.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          await requestPermission();
+        });
+      }
+    } catch (e) {
+      toast('DB 초기화 실패: ' + e.message, true);
+      console.error(e);
+    }
+  })();
+  </script>
+</body>
+</html>
