@@ -21,70 +21,59 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode version
-        run: |
-          sudo xcode-select -s /Applications/Xcode_15.0.app/Contents/Developer || \
-          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-          xcodebuild -version
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Resolve dependencies
+        run: swift package resolve
 
       - name: Build (Debug)
         run: |
-          xcodebuild \
-            -scheme ClipboardHistoryMac \
-            -destination 'platform=macOS' \
-            -configuration Debug \
-            -derivedDataPath build \
-            CODE_SIGN_IDENTITY="-" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            build
+          swift build \
+            --configuration debug \
+            --arch $(uname -m)
 
       - name: Build (Release)
         run: |
-          xcodebuild \
-            -scheme ClipboardHistoryMac \
-            -destination 'platform=macOS' \
-            -configuration Release \
-            -derivedDataPath build-release \
-            CODE_SIGN_IDENTITY="-" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            build
+          swift build \
+            --configuration release \
+            --arch $(uname -m)
 
-      - name: Find .app
-        id: find-app
+      - name: Locate built executable
+        id: find-exe
         run: |
-          APP_PATH=$(find build-release -name "ClipboardHistoryMac.app" -type d | head -1)
-          echo "app_path=$APP_PATH" >> $GITHUB_OUTPUT
-          ls -la "$APP_PATH"
+          EXE_PATH=$(swift build --configuration release --show-bin-path)/ClipboardHistoryMac
+          echo "exe_path=$EXE_PATH" >> $GITHUB_OUTPUT
+          ls -la "$EXE_PATH"
+          file "$EXE_PATH"
 
-      - name: Package .app as DMG
-        if: matrix.os == 'macos-14'
+      - name: Create .app bundle structure
         run: |
-          cd build-release
-          APP_PATH=$(find . -name "ClipboardHistoryMac.app" -type d | head -1)
-          # DMG 생성 (선택적)
-          mkdir -p dmg-staging
-          cp -R "$APP_PATH" dmg-staging/
-          hdiutil create -volname "ClipboardHistoryMac" \
-            -srcfolder dmg-staging \
-            -ov -format UDZO \
-            ClipboardHistoryMac-${{ github.sha }}.dmg || echo "DMG creation skipped"
+          APP_DIR="ClipboardHistoryMac.app"
+          rm -rf "$APP_DIR"
+          mkdir -p "$APP_DIR/Contents/MacOS"
+          mkdir -p "$APP_DIR/Contents/Resources"
+          EXE_PATH=$(swift build --configuration release --show-bin-path)/ClipboardHistoryMac
+          cp "$EXE_PATH" "$APP_DIR/Contents/MacOS/ClipboardHistoryMac"
+          cp Sources/ClipboardHistoryMac/Info.plist "$APP_DIR/Contents/Info.plist"
+          cp Sources/ClipboardHistoryMac/ClipboardHistory.entitlements "$APP_DIR/Contents/Resources/" 2>/dev/null || true
+          chmod +x "$APP_DIR/Contents/MacOS/ClipboardHistoryMac"
+
+      - name: Ad-hoc code sign
+        run: |
+          codesign --force --deep --sign - ClipboardHistoryMac.app
+          codesign --verify --verbose ClipboardHistoryMac.app
+
+      - name: Package as zip
+        run: |
+          zip -r ClipboardHistoryMac-${{ matrix.os }}.zip ClipboardHistoryMac.app
 
       - name: Upload .app artifact
         uses: actions/upload-artifact@v4
         with:
           name: ClipboardHistoryMac-${{ matrix.os }}
-          path: ${{ steps.find-app.outputs.app_path }}.zip
-          if-no-files-found: warn
-
-      - name: Upload DMG (macos-14 only)
-        if: matrix.os == 'macos-14'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ClipboardHistoryMac-DMG-${{ matrix.os }}
-          path: build-release/ClipboardHistoryMac-*.dmg
-          if-no-files-found: ignore
+          path: ClipboardHistoryMac-${{ matrix.os }}.zip
+          if-no-files-found: error
 
   release:
     name: Create Release
@@ -102,7 +91,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*
+          files: artifacts/**/*.zip
           generate_release_notes: true
           draft: false
           prerelease: false
