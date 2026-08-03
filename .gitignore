@@ -35,3 +35,6 @@ dmg-staging/Resources/index.html
 
 .swiftpm/
 
+# senpi task artifacts
+.omo/senpi-task/
+
