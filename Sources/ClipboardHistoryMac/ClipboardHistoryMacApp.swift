@@ -3,11 +3,11 @@ import AppKit
 
 @main
 struct ClipboardHistoryMacApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var storage = StorageManager()
     @StateObject private var watcher: ClipboardWatcher
 
     init() {
-        // Storage와 Watcher는 서로 의존 → 수동 초기화
         let storage = StorageManager()
         let watcher = ClipboardWatcher(storage: storage)
         _storage = StateObject(wrappedValue: storage)
@@ -15,14 +15,15 @@ struct ClipboardHistoryMacApp: App {
     }
 
     var body: some Scene {
-        // 1) MenuBarExtra — 메뉴바 상주 아이콘
         MenuBarExtra {
             MenuContentView(
                 storage: storage,
-                watcher: watcher
+                watcher: watcher,
+                openFullHistory: { [weak appDelegate] in
+                    appDelegate?.openMainWindow(storage: storage, watcher: watcher)
+                }
             )
         } label: {
-            // 메뉴바 아이콘 + 카운트
             HStack(spacing: 4) {
                 Image(systemName: "doc.on.clipboard")
                 if watcher.capturedCount > 0 {
@@ -33,7 +34,6 @@ struct ClipboardHistoryMacApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        // 2) 메인 윈도우 (검색 + 목록)
         Window("Clipboard History", id: "main") {
             MainWindowView(
                 storage: storage,
@@ -43,5 +43,42 @@ struct ClipboardHistoryMacApp: App {
         }
         .windowResizability(.contentMinSize)
         .defaultSize(width: 900, height: 600)
+    }
+}
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var mainWindowController: NSWindowController?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+    }
+
+    func openMainWindow(storage: StorageManager, watcher: ClipboardWatcher) {
+        NSApp.activate(ignoringOtherApps: true)
+        if let existing = mainWindowController?.window, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            return
+        }
+        if let existing = mainWindowController?.window {
+            existing.makeKeyAndOrderFront(nil)
+            mainWindowController = nil
+            return
+        }
+
+        let controller = NSHostingController(
+            rootView: MainWindowView(storage: storage, watcher: watcher)
+                .frame(minWidth: 700, minHeight: 500)
+        )
+        let window = NSWindow(contentViewController: controller)
+        window.title = "Clipboard History"
+        window.setContentSize(NSSize(width: 900, height: 600))
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.collectionBehavior.insert(.fullScreenPrimary)
+        window.isReleasedWhenClosed = false
+        window.center()
+        let windowController = NSWindowController(window: window)
+        windowController.showWindow(nil)
+        window.makeKeyAndOrderFront(nil)
+        mainWindowController = windowController
     }
 }

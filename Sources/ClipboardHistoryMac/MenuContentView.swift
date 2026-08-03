@@ -4,7 +4,18 @@ import AppKit
 struct MenuContentView: View {
     @ObservedObject var storage: StorageManager
     @ObservedObject var watcher: ClipboardWatcher
+    /// Injected by the App; SwiftUI's @Environment(\.openWindow) does not reach Window scenes
+    /// reliably when this view is hosted inside MenuBarExtra(.window).
+    var openFullHistory: () -> Void
     @Environment(\.openURL) private var openURL
+
+    init(storage: StorageManager,
+         watcher: ClipboardWatcher,
+         openFullHistory: @escaping () -> Void) {
+        self.storage = storage
+        self.watcher = watcher
+        self.openFullHistory = openFullHistory
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -67,9 +78,14 @@ struct MenuContentView: View {
             }
 
             VStack(alignment: .leading, spacing: 0) {
-                OpenFullHistoryButton()
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 4)
+                Button {
+                    openFullHistory()
+                } label: {
+                    Label("전체 히스토리 열기", systemImage: "rectangle.stack")
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
 
                 Button {
                     watcher.togglePause()
@@ -114,19 +130,5 @@ struct MenuContentView: View {
             .padding(.vertical, 4)
         }
         .frame(width: 280)
-    }
-}
-
-private struct OpenFullHistoryButton: View {
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        Button {
-            openWindow(id: "main")
-            NSApp.activate(ignoringOtherApps: true)
-        } label: {
-            Label("전체 히스토리 열기", systemImage: "rectangle.stack")
-        }
-        .buttonStyle(.plain)
     }
 }
