@@ -27,24 +27,28 @@ final class StorageManager: ObservableObject {
     private let imagesDir: URL
     private let metadataFile: URL
 
-    init() {
-        // ~/Library/Application Support/ClipboardHistoryMac/
+    convenience init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        baseDir = appSupport.appendingPathComponent("ClipboardHistoryMac", isDirectory: true)
-        entriesFile = baseDir.appendingPathComponent("entries.json")
-        imagesDir = baseDir.appendingPathComponent("images", isDirectory: true)
-        metadataFile = baseDir.appendingPathComponent("metadata.json")
+        let defaultBase = appSupport.appendingPathComponent("ClipboardHistoryMac", isDirectory: true)
+        self.init(baseDirectory: defaultBase)
+    }
 
-        // 디렉토리 생성
+    init(baseDirectory: URL) {
+        self.baseDir = baseDirectory
+        self.entriesFile = baseDirectory.appendingPathComponent("entries.json")
+        self.imagesDir = baseDirectory.appendingPathComponent("images", isDirectory: true)
+        self.metadataFile = baseDirectory.appendingPathComponent("metadata.json")
+
         try? FileManager.default.createDirectory(at: baseDir, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: imagesDir, withIntermediateDirectories: true)
 
-        // 이미지 한도 로드
         let saved = UserDefaults.standard.integer(forKey: "imageLimit")
-        imageLimit = saved > 0 ? saved : 100
+        self.imageLimit = saved > 0 ? saved : 100
 
         load()
     }
+
+    var baseDirectory: URL { baseDir }
 
     // MARK: - Load / Save
 

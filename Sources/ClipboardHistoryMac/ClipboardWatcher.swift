@@ -55,14 +55,18 @@ final class ClipboardWatcher: ObservableObject {
 
     /// 수동 캡처
     func captureNow() {
-        tick()
+        tick(pasteboard: .general)
+    }
+
+    /// Tests / manual triggers: process the supplied pasteboard synchronously.
+    func processNow(pasteboard: NSPasteboard) {
+        tick(pasteboard: pasteboard)
     }
 
     /// 폴링 tick
-    private func tick() {
+    private func tick(pasteboard: NSPasteboard = .general) {
         guard !isPaused else { return }
 
-        let pasteboard = NSPasteboard.general
         let currentChangeCount = pasteboard.changeCount
 
         // 변경 없으면 skip

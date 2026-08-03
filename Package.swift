@@ -17,6 +17,11 @@ let package = Package(
                 "Info.plist",
                 "ClipboardHistory.entitlements"
             ]
+        ),
+        .testTarget(
+            name: "ClipboardHistoryMacTests",
+            dependencies: ["ClipboardHistoryMac"],
+            path: "Tests/ClipboardHistoryMacTests"
         )
     ]
 )
