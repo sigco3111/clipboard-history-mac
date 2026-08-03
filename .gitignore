@@ -33,3 +33,5 @@ ClipboardHistoryMac.app/
 ClipboardHistoryMac-*.dmg
 dmg-staging/Resources/index.html
 
+.swiftpm/
+
