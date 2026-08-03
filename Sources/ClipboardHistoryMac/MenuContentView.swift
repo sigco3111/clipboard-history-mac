@@ -1,16 +1,13 @@
 import SwiftUI
 import AppKit
 
-/// 메뉴바 드롭다운 콘텐츠
 struct MenuContentView: View {
     @ObservedObject var storage: StorageManager
     @ObservedObject var watcher: ClipboardWatcher
-    @Binding var showMainWindow: Bool
     @Environment(\.openURL) private var openURL
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // 상태 헤더
             HStack {
                 Image(systemName: "doc.on.clipboard")
                 Text("Clipboard History")
@@ -26,7 +23,6 @@ struct MenuContentView: View {
 
             Divider()
 
-            // 카운트
             let textCount = storage.entries.filter { $0.type == "text" }.count
             let imageCount = storage.entries.filter { $0.type == "image" }.count
             HStack(spacing: 12) {
@@ -46,7 +42,6 @@ struct MenuContentView: View {
 
             Divider()
 
-            // 최근 5개 텍스트
             let recentText = storage.entries.filter { $0.type == "text" }.prefix(3)
             if !recentText.isEmpty {
                 Text("최근 텍스트")
@@ -71,26 +66,10 @@ struct MenuContentView: View {
                 Divider()
             }
 
-            // 액션 메뉴
             VStack(alignment: .leading, spacing: 0) {
-                Button {
-                    showMainWindow = true
-                    NSApp.activate(ignoringOtherApps: true)
-                } label: {
-                    Label("전체 히스토리 열기", systemImage: "rectangle.stack")
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
-
-                Button {
-                    watcher.captureNow()
-                } label: {
-                    Label("지금 캡처", systemImage: "doc.on.doc")
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
+                OpenFullHistoryButton()
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
 
                 Button {
                     watcher.togglePause()
@@ -109,7 +88,6 @@ struct MenuContentView: View {
 
             Divider()
 
-            // 환경설정
             VStack(alignment: .leading, spacing: 0) {
                 Button {
                     if let url = URL(string: "https://github.com/sigco3111/clipboard-history") {
@@ -136,5 +114,19 @@ struct MenuContentView: View {
             .padding(.vertical, 4)
         }
         .frame(width: 280)
+    }
+}
+
+private struct OpenFullHistoryButton: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button {
+            openWindow(id: "main")
+            NSApp.activate(ignoringOtherApps: true)
+        } label: {
+            Label("전체 히스토리 열기", systemImage: "rectangle.stack")
+        }
+        .buttonStyle(.plain)
     }
 }

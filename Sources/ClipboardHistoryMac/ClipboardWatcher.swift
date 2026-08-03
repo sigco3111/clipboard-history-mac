@@ -54,11 +54,6 @@ final class ClipboardWatcher: ObservableObject {
         }
     }
 
-    /// 수동 캡처
-    func captureNow() {
-        tick(pasteboard: .general)
-    }
-
     /// Tests / manual triggers: process the supplied pasteboard synchronously.
     func processNow(pasteboard: NSPasteboard) {
         tick(pasteboard: pasteboard)

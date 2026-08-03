@@ -5,7 +5,6 @@ import AppKit
 struct ClipboardHistoryMacApp: App {
     @StateObject private var storage = StorageManager()
     @StateObject private var watcher: ClipboardWatcher
-    @State private var showMainWindow = false
 
     init() {
         // Storage와 Watcher는 서로 의존 → 수동 초기화
@@ -20,8 +19,7 @@ struct ClipboardHistoryMacApp: App {
         MenuBarExtra {
             MenuContentView(
                 storage: storage,
-                watcher: watcher,
-                showMainWindow: $showMainWindow
+                watcher: watcher
             )
         } label: {
             // 메뉴바 아이콘 + 카운트

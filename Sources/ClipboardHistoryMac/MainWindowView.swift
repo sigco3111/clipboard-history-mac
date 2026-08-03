@@ -17,11 +17,6 @@ struct MainWindowView: View {
                     .textFieldStyle(.plain)
                 Spacer()
                 Button {
-                    watcher.captureNow()
-                } label: {
-                    Label("지금 캡처", systemImage: "doc.on.doc")
-                }
-                Button {
                     watcher.togglePause()
                 } label: {
                     if watcher.isPaused {
@@ -101,11 +96,10 @@ struct MainWindowView: View {
             }
         }
         .onAppear {
-            // 윈도우 열릴 때 자동 캡처 시작
-            watcher.start()
+            // Watcher already runs from init; nothing to start here.
         }
         .onDisappear {
-            watcher.stop()
+            // Watcher keeps running so the menu-bar app continues to capture.
         }
     }
 
