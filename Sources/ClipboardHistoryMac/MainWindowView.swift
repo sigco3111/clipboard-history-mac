@@ -68,7 +68,7 @@ struct MainWindowView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
-            .background(.background.secondary)
+            .background(Color.gray.opacity(0.1))
 
             Divider()
 
@@ -170,7 +170,7 @@ struct EntryRow: View {
                     Text("\(entry.size) B")
                 }
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary.opacity(0.7))
             }
 
             Spacer()
