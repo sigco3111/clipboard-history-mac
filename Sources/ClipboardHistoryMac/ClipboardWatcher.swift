@@ -103,20 +103,36 @@ final class ClipboardWatcher: ObservableObject {
         }
     }
 
-    /// 이미지 캡처 (PNG/JPEG/WebP 우선)
+    /// 이미지 캡처 (PNG/TIFF/비트맵 우선)
     private func captureImage(pasteboard: NSPasteboard) -> Data? {
-        // PNG
         if let data = pasteboard.data(forType: .png) {
             return data
         }
-        // TIFF → PNG 변환 (macOS 스크린샷은 TIFF로 옴)
-        if let tiffData = pasteboard.data(forType: .tiff) {
-            if let nsImage = NSImage(data: tiffData),
-               let tiff = tiffData as Data?,
-               let bitmap = NSBitmapImageRep(data: tiff),
-               let png = bitmap.representation(using: .png, properties: [:]) {
-                return png
-            }
+        if let tiffData = pasteboard.data(forType: .tiff),
+           let png = tiffToPNG(tiffData) {
+            return png
+        }
+        if let anyImageData = pasteboard.data(forType: .init("public.image")),
+           let png = imageDataToPNG(anyImageData) {
+            return png
+        }
+        return nil
+    }
+
+    private func tiffToPNG(_ tiff: Data) -> Data? {
+        if let bitmap = NSBitmapImageRep(data: tiff),
+           let png = bitmap.representation(using: .png, properties: [:]) {
+            return png
+        }
+        if let png = imageDataToPNG(tiff) {
+            return png
+        }
+        return nil
+    }
+
+    private func imageDataToPNG(_ data: Data) -> Data? {
+        if let bitmap = NSBitmapImageRep(data: data) {
+            return bitmap.representation(using: .png, properties: [:])
         }
         return nil
     }
