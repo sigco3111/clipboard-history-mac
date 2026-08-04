@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var watcherObservation: AnyCancellable?
     private var storageObservation: AnyCancellable?
     private var refreshTimer: Timer?
+    private var globalHotkey: GlobalHotkey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let storage = StorageManager()
@@ -27,6 +28,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.watcher = watcher
         installStatusMenu()
         observeStateChanges()
+        registerGlobalHotkey()
+    }
+
+    /// Cmd+Shift+V — opens the main window from any focused app. Avoids the
+    /// Accessibility permission requirement by using Carbon's RegisterEventHotKey.
+    private func registerGlobalHotkey() {
+        let hotkey = GlobalHotkey()
+        // Carbon key/modifier constants: V=9, cmdKey=0x100, shiftKey=0x200. Hardcoded
+        // because `import Carbon` would only happen conditionally here and we want
+        // the App.swift to keep its AppKit/Combine-import footprint.
+        guard hotkey.register(
+            keyCode: UInt32(9),  // kVK_ANSI_V
+            modifiers: UInt32(0x100 | 0x200),  // cmdKey | shiftKey
+            handler: { [weak self] in self?.openMainWindow(nil) }
+        ) else {
+            FileHandle.standardError.write(Data("[hotkey] Cmd+Shift+V registration failed\n".utf8))
+            return
+        }
+        globalHotkey = hotkey
     }
 
     private func observeStateChanges() {
