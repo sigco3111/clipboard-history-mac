@@ -239,10 +239,14 @@ final class GlobalHotkeyTests: XCTestCase {
                       "AppDelegate must use a GlobalHotkey wrapper")
         XCTAssertTrue(src.contains("registerGlobalHotkey"),
                       "AppDelegate.applicationDidFinishLaunching must invoke registerGlobalHotkey()")
-        XCTAssertTrue(src.contains("kVK_ANSI_V"),
-                      "Hotkey target keyCode must be kVK_ANSI_V")
-        XCTAssertTrue(src.contains("cmdKey | shiftKey") || src.contains("cmdKey + shiftKey"),
-                      "Modifiers must be cmd + shift")
+        XCTAssertTrue(src.contains("kVK_ANSI_V") || src.contains("UInt32(9)"),
+                      "Hotkey target keyCode must be kVK_ANSI_V (or numeric 9)")
+        // Cmd+Shift+V is reserved (Paste and Match Style) and gets eaten by foreground apps.
+        // We use cmdKey | optionKey (0x100 | 0x800 = 0x900) to avoid that conflict.
+        XCTAssertTrue(src.contains("0x100 | 0x800") || src.contains("optionKey"),
+                      "Modifiers must include optionKey (0x800) instead of shiftKey")
+        XCTAssertFalse(src.contains("0x100 | 0x200") || src.contains("cmdKey | shiftKey"),
+                       "Modifiers must NOT include shiftKey (Cmd+Shift+V is reserved)")
     }
 
     /// Source-text regression: GlobalHotkey.swift must use Carbon RegisterEventHotKey
@@ -315,6 +319,31 @@ final class GlobalHotkeyTests: XCTestCase {
         _ = fired
         _ = sema
         _ = handler
+    }
+
+    private func sourceText(of file: String) throws -> String {
+        let here = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let root = here.deletingLastPathComponent().deletingLastPathComponent()
+        let url = root.appendingPathComponent("Sources/ClipboardHistoryMac/\(file)")
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+}
+@MainActor
+final class GlobalHotkeyOptionTests: XCTestCase {
+
+    /// Cmd+Shift+V is bound by most macOS apps as 'Paste and Match Style', causing
+    /// it to be eaten by the frontmost app's menu equivalent. Switch to Cmd+Option+V
+    /// which is rarely used and reliably reserved by Carbon.
+    func testAppDelegateUsesCmdOptionVNotCmdShiftV() throws {
+        let src = try sourceText(of: "ClipboardHistoryMacApp.swift")
+        let keyCodeLine = src.components(separatedBy: "\n").first { $0.contains("keyCode:") }
+        XCTAssertNotNil(keyCodeLine, "AppDelegate must invoke hotkey.register with keyCode")
+        XCTAssertTrue(src.contains("0x800") || src.contains("optionKey"),
+                      "Modifiers must include optionKey (0x800), not just cmdKey+shiftKey")
+        XCTAssertFalse((keyCodeLine?.contains("shiftKey") ?? false),
+                      "KeyCode modifier line must NOT include shiftKey (Cmd+Shift+V is reserved by apps)")
+        XCTAssertNotNil(keyCodeLine?.contains("9"),
+                         "KeyCode line should reference kVK_ANSI_V=9")
     }
 
     private func sourceText(of file: String) throws -> String {

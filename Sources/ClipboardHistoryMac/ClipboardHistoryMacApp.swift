@@ -31,22 +31,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerGlobalHotkey()
     }
 
-    /// Cmd+Shift+V — opens the main window from any focused app. Avoids the
+    /// Cmd+Option+V — opens the main window from any focused app. Avoids the
     /// Accessibility permission requirement by using Carbon's RegisterEventHotKey.
+    /// Cmd+Shift+V was tried first but is bound by most apps as 'Paste and Match Style'
+    /// which intercepts the keystroke before the system dispatches to our Carbon handler.
     private func registerGlobalHotkey() {
         let hotkey = GlobalHotkey()
-        // Carbon key/modifier constants: V=9, cmdKey=0x100, shiftKey=0x200. Hardcoded
+        // Carbon key/modifier constants: V=9, cmdKey=0x100, optionKey=0x800. Hardcoded
         // because `import Carbon` would only happen conditionally here and we want
         // the App.swift to keep its AppKit/Combine-import footprint.
+        //
+        // Cmd+Shift+V is reserved by most apps as 'Paste and Match Style' and gets
+        // eaten by the frontmost app's menu equivalent even after Carbon registers it.
+        // Cmd+Option+V is rarely used on macOS and reliably surfaces.
         guard hotkey.register(
             keyCode: UInt32(9),  // kVK_ANSI_V
-            modifiers: UInt32(0x100 | 0x200),  // cmdKey | shiftKey
+            modifiers: UInt32(0x100 | 0x800),  // cmdKey | optionKey
             handler: { [weak self] in self?.openMainWindow(nil) }
         ) else {
-            FileHandle.standardError.write(Data("[hotkey] Cmd+Shift+V registration failed\n".utf8))
+            FileHandle.standardError.write(Data("[hotkey] Cmd+Option+V registration failed\n".utf8))
             return
         }
         globalHotkey = hotkey
+        FileHandle.standardError.write(Data("[hotkey] Cmd+Option+V registered; ready\n".utf8))
     }
 
     private func observeStateChanges() {

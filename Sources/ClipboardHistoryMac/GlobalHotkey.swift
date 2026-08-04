@@ -70,10 +70,12 @@ final class GlobalHotkey: NSObject {
         let opaque = Unmanaged.passUnretained(self).toOpaque()
 
         let carbonHandler: EventHandlerUPP = { (_, _, userData) -> OSStatus in
+            FileHandle.standardError.write(Data("[hotkey] carbon event received\n".utf8))
             guard let userData = userData else { return noErr }
             let manager = Unmanaged<GlobalHotkey>.fromOpaque(userData).takeUnretainedValue()
             // The handler is invoked from the main runloop; dispatch to main if not.
             DispatchQueue.main.async {
+                FileHandle.standardError.write(Data("[hotkey] dispatching to Swift\n".utf8))
                 manager.handler?()
             }
             return noErr
