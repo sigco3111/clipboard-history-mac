@@ -403,3 +403,38 @@ final class AppLoggerTests: XCTestCase {
         return try String(contentsOf: url, encoding: .utf8)
     }
 }
+
+@MainActor
+final class StatusBarDoubleClickTests: XCTestCase {
+
+    /// Source-text regression: AppDelegate installs a double-click handler on the
+    /// status bar button so users have a permission-free discovery path to the
+    /// main window (especially helpful when Carbon global hotkey fails because
+    /// Input Monitoring isn't granted).
+    func testAppDelegateWiresStatusBarDoubleClick() throws {
+        let src = try sourceText(of: "ClipboardHistoryMacApp.swift")
+        XCTAssertTrue(src.contains("statusBarButtonClicked"),
+                      "AppDelegate must implement statusBarButtonClicked handler")
+        XCTAssertTrue(src.contains("button?.target = self"),
+                      "Status bar button target must be AppDelegate for click routing")
+        XCTAssertTrue(src.contains("button?.sendAction(on: [.leftMouseDown])"),
+                      "Status bar button must declare leftMouseDown as its trigger event")
+        XCTAssertTrue(src.contains("statusItemDoubleClickWindow"),
+                      "AppDelegate must track double-click window timing")
+    }
+
+    func testDiagnosticsFlagsForOpenWindowVerification() throws {
+        let src = try sourceText(of: "ClipboardHistoryMacApp.swift")
+        XCTAssertTrue(src.contains("--ulw-fire-open"),
+                      "AppDelegate must honor --ulw-fire-open for open-pipeline verification")
+        XCTAssertTrue(src.contains("--ulw-simulate-hotkey"),
+                      "AppDelegate must honor --ulw-simulate-hotkey for Carbon-handler verification")
+    }
+
+    private func sourceText(of file: String) throws -> String {
+        let here = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let root = here.deletingLastPathComponent().deletingLastPathComponent()
+        let url = root.appendingPathComponent("Sources/ClipboardHistoryMac/\(file)")
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+}

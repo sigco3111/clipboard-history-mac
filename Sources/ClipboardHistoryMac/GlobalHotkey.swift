@@ -99,4 +99,12 @@ final class GlobalHotkey: NSObject {
     func simulateCarbonEventForTests() {
         handler?()
     }
+
+    /// Diagnostic — same as `simulateCarbonEventForTests`, exposed without the @objc
+    /// selector so the launch-flag plumbing can call it from a non-@objc context.
+    @MainActor
+    func fireHandler() {
+        AppLog.info("fireHandler() invoked (test/diagnostic path)")
+        handler?()
+    }
 }

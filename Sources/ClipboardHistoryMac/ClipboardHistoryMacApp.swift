@@ -29,6 +29,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         installStatusMenu()
         observeStateChanges()
         registerGlobalHotkey()
+        // --ulw-fire-open: drives openMainWindow path so users can confirm the
+        // open-pipeline works (independent of Carbon hotkey delivery).
+        if CommandLine.arguments.contains("--ulw-fire-open") {
+            AppLog.info("--ulw-fire-open active; scheduling openMainWindow")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.openMainWindow(nil)
+            }
+        }
+        // --ulw-simulate-hotkey: programmatically invokes the registered Carbon
+        // handler as if Carbon fired. Proves whether the Swift-side dispatch path
+        // (handler → main → openMainWindow) works.
+        if CommandLine.arguments.contains("--ulw-simulate-hotkey") {
+            AppLog.info("--ulw-simulate-hotkey active; firing hotkey handler")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.globalHotkey?.fireHandler()
+            }
+        }
     }
 
     /// Cmd+Option+Shift+V — opens the main window from any focused app. Avoids the
@@ -176,6 +193,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.imagePosition = NSControl.ImagePosition.imageLeft
         item.menu = menu
         self.statusItem = item
+        // Double-click on the status bar icon opens the main window directly.
+        // This is a reliable, permission-free discovery path that works even when
+        // Carbon RegisterEventHotKey fails (e.g., Input Monitoring not granted).
+        let button = item.button
+        button?.target = self
+        button?.action = #selector(statusBarButtonClicked(_:))
+        button?.sendAction(on: [.leftMouseDown])
+        // Configure double-click interval to be slightly longer than default
+        // so a normal click doesn't trigger it.
+        self.statusItemDoubleClickWindow = 0.5
+        self.lastStatusBarClickTimestamp = 0
 
         refreshMenu()
     }
@@ -277,6 +305,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let entry = sender.representedObject as? StorageManager.Entry,
               let filename = entry.imageFilename else { return }
         storage?.copyImage(filename: filename)
+    }
+
+    private var statusItemDoubleClickWindow: TimeInterval = 0.35
+    private var lastStatusBarClickTimestamp: TimeInterval = 0
+
+    @objc func statusBarButtonClicked(_ sender: Any?) {
+        let now = CACurrentMediaTime()
+        let delta = now - lastStatusBarClickTimestamp
+        lastStatusBarClickTimestamp = now
+        if delta < statusItemDoubleClickWindow && delta > 0 {
+            // Double-click → open main window. Single clicks fall through to NSMenu.
+            AppLog.info("status bar double-click: opening main window")
+            openMainWindow(nil)
+        }
     }
 
     @objc func openMainWindow(_ sender: Any?) {
