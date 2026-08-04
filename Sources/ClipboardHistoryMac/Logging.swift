@@ -1,7 +1,6 @@
 import Foundation
 import os.log
 
-@MainActor
 enum AppLog {
     private static let logger = Logger(subsystem: "com.clipboard-history-mac", category: "app")
     private static let logFileURL: URL = {
@@ -11,12 +10,12 @@ enum AppLog {
         return dir.appendingPathComponent("ClipboardHistoryMac.log")
     }()
 
-    static func info(_ message: String) {
+    nonisolated static func info(_ message: String) {
         logger.info("\(message, privacy: .public)")
         appendToFile("[INFO] " + message)
     }
 
-    static func error(_ message: String) {
+    nonisolated static func error(_ message: String) {
         logger.error("\(message, privacy: .public)")
         appendToFile("[ERROR] " + message)
     }

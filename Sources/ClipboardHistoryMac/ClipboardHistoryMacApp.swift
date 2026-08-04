@@ -19,7 +19,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var watcherObservation: AnyCancellable?
     private var storageObservation: AnyCancellable?
     private var refreshTimer: Timer?
-    private var globalHotkey: GlobalHotkey?
+    private var statusItemDoubleClickWindow: TimeInterval = 0.35
+    private var lastStatusBarClickTimestamp: TimeInterval = 0
+    private var toggleItemRef: NSMenuItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let storage = StorageManager()
@@ -28,51 +30,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.watcher = watcher
         installStatusMenu()
         observeStateChanges()
-        registerGlobalHotkey()
-        // --ulw-fire-open: drives openMainWindow path so users can confirm the
-        // open-pipeline works (independent of Carbon hotkey delivery).
+        // Diagnostic flags — see README.md
         if CommandLine.arguments.contains("--ulw-fire-open") {
-            AppLog.info("--ulw-fire-open active; scheduling openMainWindow")
+            AppLog.info("--ulw-fire-open active; scheduling openMainWindow after 1.5s")
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 self?.openMainWindow(nil)
             }
         }
-        // --ulw-simulate-hotkey: programmatically invokes the registered Carbon
-        // handler as if Carbon fired. Proves whether the Swift-side dispatch path
-        // (handler → main → openMainWindow) works.
-        if CommandLine.arguments.contains("--ulw-simulate-hotkey") {
-            AppLog.info("--ulw-simulate-hotkey active; firing hotkey handler")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                self?.globalHotkey?.fireHandler()
-            }
-        }
-    }
-
-    /// Cmd+Option+Shift+V — opens the main window from any focused app. Avoids the
-    /// Accessibility permission requirement by using Carbon's RegisterEventHotKey.
-    /// Cmd+Shift+V is bound by most apps as 'Paste and Match Style' and Cmd+Option+V
-    /// can be reserved by some screenshot tools; the 3-modifier combo (Cmd+Opt+Shift+V)
-    /// has effectively zero contention on macOS.
-    private func registerGlobalHotkey() {
-        let hotkey = GlobalHotkey()
-        // Carbon key/modifier constants: V=9, cmdKey=0x100, optionKey=0x800,
-        // shiftKey=0x200. Hardcoded because `import Carbon` would only happen
-        // conditionally here and we want App.swift to keep its AppKit/Combine-import footprint.
-        //
-        // Cmd+Shift+V is bound by most apps as 'Paste and Match Style'. Cmd+Option+V
-        // can be reserved by some screenshot / system tools. Cmd+Option+Shift+V is a
-        // 3-modifier combo that is essentially never bound by any system or standard
-        // app, so the Carbon hotkey reliably fires regardless of which app is foreground.
-        guard hotkey.register(
-            keyCode: UInt32(9),  // kVK_ANSI_V
-            modifiers: UInt32(0x100 | 0x800 | 0x200),  // cmdKey | optionKey | shiftKey
-            handler: { [weak self] in self?.openMainWindow(nil) }
-        ) else {
-            AppLog.error("Cmd+Option+Shift+V registration failed")
-            return
-        }
-        globalHotkey = hotkey
-        AppLog.info("Cmd+Option+Shift+V registered; ready")
     }
 
     private func observeStateChanges() {
@@ -192,23 +156,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         item.button?.imagePosition = NSControl.ImagePosition.imageLeft
         item.menu = menu
-        self.statusItem = item
-        // Double-click on the status bar icon opens the main window directly.
-        // This is a reliable, permission-free discovery path that works even when
-        // Carbon RegisterEventHotKey fails (e.g., Input Monitoring not granted).
+
+        // Double-click on the status bar icon opens the main window directly. This is
+        // a permission-free path that works on every macOS 13+ system without Input
+        // Monitoring or Accessibility grants.
         let button = item.button
         button?.target = self
         button?.action = #selector(statusBarButtonClicked(_:))
         button?.sendAction(on: [.leftMouseDown])
-        // Configure double-click interval to be slightly longer than default
-        // so a normal click doesn't trigger it.
-        self.statusItemDoubleClickWindow = 0.5
-        self.lastStatusBarClickTimestamp = 0
 
+        self.statusItem = item
         refreshMenu()
     }
-
-    private var toggleItemRef: NSMenuItem?
 
     private func refreshMenu() {
         guard let watcher, let storage else { return }
@@ -216,13 +175,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let textCount = storage.entries.filter { $0.type == "text" }.count
         let imageCount = storage.entries.filter { $0.type == "image" }.count
 
-        // Status bar title with count
         if let button = statusItem?.button {
             let title = totalCount > 0 ? "  \(totalCount)" : nil
             button.title = title ?? ""
         }
 
-        // Header item
         var lines: [String] = []
         lines.append("캡처: 총 \(totalCount)개 (텍스트 \(textCount) · 이미지 \(imageCount))")
         if let last = watcher.lastCaptureTime {
@@ -235,7 +192,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         statusHeaderItem?.title = lines.joined(separator: "\n")
 
-        // Permission warning
         if watcher.lastIssue == .permissionLikelyDenied {
             permissionWarningItem?.title =
                 "⚠️ 클립보드 권한 필요 — 시스템 설정 → 개인 정보 보호 → 클립보드에서 이 앱을 허용하세요"
@@ -244,14 +200,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             permissionWarningItem?.isHidden = true
         }
 
-        // Toggle item
         if watcher.isPaused {
             toggleItemRef?.title = "자동 캡처 재개"
         } else {
             toggleItemRef?.title = "자동 캡처 일시정지"
         }
 
-        // Recent text items — re-copy on click via representedObject + #selector
         let textEntries = storage.entries.filter { $0.type == "text" }.prefix(3)
         for (idx, item) in recentTextItems.enumerated() {
             if idx < textEntries.count {
@@ -270,7 +224,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         recentTextHeader?.title = textEntries.isEmpty ? "최근 텍스트 (없음)" : "최근 텍스트 — 클릭 시 복사"
 
-        // Recent image items — re-copy on click via representedObject + #selector
         let imageEntries = storage.entries.filter { $0.type == "image" }.prefix(3)
         for (idx, item) in recentImageItems.enumerated() {
             if idx < imageEntries.count {
@@ -295,6 +248,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         recentImageHeader?.title = imageEntries.isEmpty ? "최근 이미지 (없음)" : "최근 이미지 — 클릭 시 복사"
     }
 
+    // MARK: - Status bar double-click
+
+    @objc func statusBarButtonClicked(_ sender: Any?) {
+        let now = CACurrentMediaTime()
+        let delta = now - lastStatusBarClickTimestamp
+        lastStatusBarClickTimestamp = now
+        if delta < statusItemDoubleClickWindow && delta > 0 {
+            AppLog.info("status bar double-click: opening main window")
+            openMainWindow(nil)
+        }
+    }
+
+    // MARK: - Recent items re-copy
+
     @objc func recentTextMenuItemClicked(_ sender: NSMenuItem) {
         guard let entry = sender.representedObject as? StorageManager.Entry,
               let text = entry.text else { return }
@@ -307,43 +274,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         storage?.copyImage(filename: filename)
     }
 
-    private var statusItemDoubleClickWindow: TimeInterval = 0.35
-    private var lastStatusBarClickTimestamp: TimeInterval = 0
-
-    @objc func statusBarButtonClicked(_ sender: Any?) {
-        let now = CACurrentMediaTime()
-        let delta = now - lastStatusBarClickTimestamp
-        lastStatusBarClickTimestamp = now
-        if delta < statusItemDoubleClickWindow && delta > 0 {
-            // Double-click → open main window. Single clicks fall through to NSMenu.
-            AppLog.info("status bar double-click: opening main window")
-            openMainWindow(nil)
-        }
-    }
+    // MARK: - Menu actions
 
     @objc func openMainWindow(_ sender: Any?) {
         guard let storage, let watcher else { return }
-        FileHandle.standardError.write(Data("[ulw] openMainWindow entry\n".utf8))
+        AppLog.info("openMainWindow invoked")
 
-        // Reuse the existing window if it has been asked to close (isVisible false) but
-        // the controller still holds a strong reference.
-        if let existing = mainWindowController?.window {
-            if existing.isVisible {
-                FileHandle.standardError.write(Data("[ulw] reusing visible window; bringing to front\n".utf8))
-                bringWindowToFront(existing)
-                return
-            }
-            FileHandle.standardError.write(Data("[ulw] dropping stale window controller\n".utf8))
-            mainWindowController = nil
+        // Reuse an existing window if it is currently visible.
+        if let existing = mainWindowController?.window, existing.isVisible {
+            bringWindowToFront(existing)
+            return
         }
-
-        // LSUIElement (= accessory) apps on macOS 14+ silently swallow
-        // `makeKeyAndOrderFront` unless we temporarily switch to `.regular`. The
-        // standard recipe is documented in TN2083.
-        let previousPolicy = NSApp.activationPolicy()
-        if previousPolicy != .regular {
-            FileHandle.standardError.write(Data("[ulw] switching activationPolicy accessory → regular\n".utf8))
-            NSApp.setActivationPolicy(.regular)
+        // If the user closed the window but the controller still holds it, drop it.
+        if mainWindowController?.window != nil {
+            mainWindowController?.window?.close()
+            mainWindowController = nil
         }
 
         let host = NSHostingController(
@@ -358,13 +303,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.isReleasedWhenClosed = false
         window.hidesOnDeactivate = false
 
-        // Center on the main NSScreen.visibleFrame; some multi-display setups
-        // have an off-main origin that puts window.center() outside the user's view.
         let visible = NSScreen.main?.visibleFrame ?? NSScreen.main?.frame ?? .zero
         if visible != .zero {
-            let originX = visible.midX - 450
-            let originY = visible.midY - 300
-            window.setFrameOrigin(NSPoint(x: originX, y: originY))
+            window.setFrameOrigin(NSPoint(x: visible.midX - 450, y: visible.midY - 300))
         } else {
             window.center()
         }
@@ -372,38 +313,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let wc = NSWindowController(window: window)
         wc.showWindow(nil)
 
-        // Aggressive presentation sequence — works for both .regular and
-        // accidentally-still-.accessory contexts.
+        // LSUIElement (accessory) apps on macOS 14+ silently swallow
+        // `makeKeyAndOrderFront` unless we temporarily switch to `.regular`.
+        let previousPolicy = NSApp.activationPolicy()
+        if previousPolicy != .regular {
+            AppLog.info("switching activationPolicy accessory → regular")
+            NSApp.setActivationPolicy(.regular)
+        }
+
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
 
-        FileHandle.standardError.write(Data("[ulw] window state: isVisible=\(window.isVisible) isKey=\(window.isKeyWindow) frame=\(window.frame)\n".utf8))
+        AppLog.info("openMainWindow: window isVisible=\(window.isVisible) isKey=\(window.isKeyWindow) frame=\(window.frame)")
 
-        // macOS 14+ quirk: switching back to .accessory while the window is on
-        // screen hides it. We stay in .regular while the window is up and revert
-        // when the window closes.
+        if previousPolicy != .regular {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                guard self != nil else { return }
+            }
+        }
+
+        // Restore accessory on window close so the menu-bar-only mode resumes.
         let previousWasRegular = previousPolicy == .regular
         NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification,
             object: window,
             queue: .main
         ) { [weak self] _ in
-            guard let self else { return }
+            guard self != nil else { return }
             if !previousWasRegular {
-                FileHandle.standardError.write(Data("[ulw] window closing; reverting activationPolicy → accessory\n".utf8))
+                AppLog.info("window closing; reverting activationPolicy → accessory")
                 NSApp.setActivationPolicy(.accessory)
             }
-            // Drop the controller so a fresh window is built next time.
-            self.mainWindowController = nil
         }
 
         mainWindowController = wc
     }
 
     private func bringWindowToFront(_ window: NSWindow) {
-        // For LSUIElement, even .regular activation policy occasionally needs a
-        // second activate() call after the window is already on screen.
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         if let frame = NSScreen.main?.visibleFrame, frame.width > 0 {
@@ -414,7 +361,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.setFrameOrigin(targetOrigin)
         }
         window.orderFrontRegardless()
-        FileHandle.standardError.write(Data("[ulw] window brought to front; isVisible=\(window.isVisible)\n".utf8))
+        AppLog.info("window brought to front; isVisible=\(window.isVisible)")
     }
 
     @objc func refreshCapture(_ sender: Any?) {
