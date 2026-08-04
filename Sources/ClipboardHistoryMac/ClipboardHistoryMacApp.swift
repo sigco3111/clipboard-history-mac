@@ -31,29 +31,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerGlobalHotkey()
     }
 
-    /// Cmd+Option+V — opens the main window from any focused app. Avoids the
+    /// Cmd+Option+Shift+V — opens the main window from any focused app. Avoids the
     /// Accessibility permission requirement by using Carbon's RegisterEventHotKey.
-    /// Cmd+Shift+V was tried first but is bound by most apps as 'Paste and Match Style'
-    /// which intercepts the keystroke before the system dispatches to our Carbon handler.
+    /// Cmd+Shift+V is bound by most apps as 'Paste and Match Style' and Cmd+Option+V
+    /// can be reserved by some screenshot tools; the 3-modifier combo (Cmd+Opt+Shift+V)
+    /// has effectively zero contention on macOS.
     private func registerGlobalHotkey() {
         let hotkey = GlobalHotkey()
-        // Carbon key/modifier constants: V=9, cmdKey=0x100, optionKey=0x800. Hardcoded
-        // because `import Carbon` would only happen conditionally here and we want
-        // the App.swift to keep its AppKit/Combine-import footprint.
+        // Carbon key/modifier constants: V=9, cmdKey=0x100, optionKey=0x800,
+        // shiftKey=0x200. Hardcoded because `import Carbon` would only happen
+        // conditionally here and we want App.swift to keep its AppKit/Combine-import footprint.
         //
-        // Cmd+Shift+V is reserved by most apps as 'Paste and Match Style' and gets
-        // eaten by the frontmost app's menu equivalent even after Carbon registers it.
-        // Cmd+Option+V is rarely used on macOS and reliably surfaces.
+        // Cmd+Shift+V is bound by most apps as 'Paste and Match Style'. Cmd+Option+V
+        // can be reserved by some screenshot / system tools. Cmd+Option+Shift+V is a
+        // 3-modifier combo that is essentially never bound by any system or standard
+        // app, so the Carbon hotkey reliably fires regardless of which app is foreground.
         guard hotkey.register(
             keyCode: UInt32(9),  // kVK_ANSI_V
-            modifiers: UInt32(0x100 | 0x800),  // cmdKey | optionKey
+            modifiers: UInt32(0x100 | 0x800 | 0x200),  // cmdKey | optionKey | shiftKey
             handler: { [weak self] in self?.openMainWindow(nil) }
         ) else {
-            FileHandle.standardError.write(Data("[hotkey] Cmd+Option+V registration failed\n".utf8))
+            AppLog.error("Cmd+Option+Shift+V registration failed")
             return
         }
         globalHotkey = hotkey
-        FileHandle.standardError.write(Data("[hotkey] Cmd+Option+V registered; ready\n".utf8))
+        AppLog.info("Cmd+Option+Shift+V registered; ready")
     }
 
     private func observeStateChanges() {

@@ -241,12 +241,12 @@ final class GlobalHotkeyTests: XCTestCase {
                       "AppDelegate.applicationDidFinishLaunching must invoke registerGlobalHotkey()")
         XCTAssertTrue(src.contains("kVK_ANSI_V") || src.contains("UInt32(9)"),
                       "Hotkey target keyCode must be kVK_ANSI_V (or numeric 9)")
-        // Cmd+Shift+V is reserved (Paste and Match Style) and gets eaten by foreground apps.
-        // We use cmdKey | optionKey (0x100 | 0x800 = 0x900) to avoid that conflict.
-        XCTAssertTrue(src.contains("0x100 | 0x800") || src.contains("optionKey"),
-                      "Modifiers must include optionKey (0x800) instead of shiftKey")
-        XCTAssertFalse(src.contains("0x100 | 0x200") || src.contains("cmdKey | shiftKey"),
-                       "Modifiers must NOT include shiftKey (Cmd+Shift+V is reserved)")
+        // Hotkey combo is 3-modifier Cmd+Option+Shift+V (0x100 | 0x800 | 0x200 = 0xB00)
+        // — 2-modifier combos collide with system menu shortcuts.
+        XCTAssertTrue(src.contains("0x100 | 0x800 | 0x200"),
+                      "Modifiers must include cmd | option | shift 3-modifier combo")
+        XCTAssertTrue(src.contains("Cmd+Option+Shift+V"),
+                      "Hotkey label in source must read Cmd+Option+Shift+V")
     }
 
     /// Source-text regression: GlobalHotkey.swift must use Carbon RegisterEventHotKey
@@ -334,16 +334,66 @@ final class GlobalHotkeyOptionTests: XCTestCase {
     /// Cmd+Shift+V is bound by most macOS apps as 'Paste and Match Style', causing
     /// it to be eaten by the frontmost app's menu equivalent. Switch to Cmd+Option+V
     /// which is rarely used and reliably reserved by Carbon.
-    func testAppDelegateUsesCmdOptionVNotCmdShiftV() throws {
+    func testAppDelegateUsesCmdOptShiftVNotCmdShiftV() throws {
         let src = try sourceText(of: "ClipboardHistoryMacApp.swift")
-        let keyCodeLine = src.components(separatedBy: "\n").first { $0.contains("keyCode:") }
-        XCTAssertNotNil(keyCodeLine, "AppDelegate must invoke hotkey.register with keyCode")
-        XCTAssertTrue(src.contains("0x800") || src.contains("optionKey"),
-                      "Modifiers must include optionKey (0x800), not just cmdKey+shiftKey")
-        XCTAssertFalse((keyCodeLine?.contains("shiftKey") ?? false),
-                      "KeyCode modifier line must NOT include shiftKey (Cmd+Shift+V is reserved by apps)")
-        XCTAssertNotNil(keyCodeLine?.contains("9"),
-                         "KeyCode line should reference kVK_ANSI_V=9")
+        // The 3-modifier combo is the source of truth.
+        XCTAssertTrue(src.contains("0x100 | 0x800 | 0x200"),
+                      "Modifiers must be cmd | option | shift 3-modifier combo")
+        XCTAssertFalse(src.contains("0x100 | 0x200  // cmdKey | shiftKey"),
+                       "Old 2-modifier Cmd+Shift+V modifier line must be gone")
+        XCTAssertTrue(src.contains("Cmd+Option+Shift+V"),
+                      "Hotkey identifier must reference Cmd+Option+Shift+V")
+    }
+
+    private func sourceText(of file: String) throws -> String {
+        let here = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let root = here.deletingLastPathComponent().deletingLastPathComponent()
+        let url = root.appendingPathComponent("Sources/ClipboardHistoryMac/\(file)")
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+}
+
+@MainActor
+final class AppLoggerTests: XCTestCase {
+
+    /// Regression: AppLog writes to ~/Library/Logs/ClipboardHistoryMac.log so the
+    /// user can `tail -f` to see Carbon event firing (helpful when stderr is hidden
+    /// because the user launched via Finder).
+    func testAppLogSourceMatchesFilePath() throws {
+        let appLogSrc = try sourceText(of: "Logging.swift")
+        // Logging source must derive the path via .libraryDirectory + Logs.
+        XCTAssertTrue(
+            appLogSrc.contains("libraryDirectory") ||
+                appLogSrc.contains("NSHomeDirectory") ||
+                appLogSrc.contains("FileManager.default.urls"),
+            "Logging.swift must derive the path via FileManager's .libraryDirectory or NSHomeDirectory"
+        )
+        XCTAssertTrue(
+            appLogSrc.contains("Logs") || appLogSrc.contains(".log"),
+            "Logging.swift must place the log under Logs directory or use .log extension"
+        )
+    }
+
+    func testGlobalHotkeyUsesAppLog() throws {
+        let hotkeySrc = try sourceText(of: "GlobalHotkey.swift")
+        XCTAssertTrue(
+            hotkeySrc.contains("AppLog"),
+            "GlobalHotkey.swift must route diagnostic through AppLog so users can see it in the file"
+        )
+        XCTAssertFalse(
+            hotkeySrc.contains("FileHandle.standardError.write"),
+            "GlobalHotkey must not use stderr-only logging — invisible when launched via Finder"
+        )
+    }
+
+    func testAppDelegateUsesCmdOptShiftV() throws {
+        let src = try sourceText(of: "ClipboardHistoryMacApp.swift")
+        XCTAssertTrue(src.contains("0x100 | 0x800 | 0x200"),
+                      "Hotkey modifier must be 3-modifier combo (cmd | option | shift)")
+        XCTAssertTrue(src.contains("Cmd+Option+Shift+V"),
+                      "Hotkey identifier must reference Cmd+Option+Shift+V")
+        XCTAssertFalse(src.contains("0x100 | 0x200"),
+                       "Old 2-modifier Cmd+Shift+V modifier combo must be gone")
     }
 
     private func sourceText(of file: String) throws -> String {

@@ -38,11 +38,12 @@ final class GlobalHotkey: NSObject {
             &ref
         )
         guard status == noErr, let registeredRef = ref else {
-            FileHandle.standardError.write(Data("[hotkey] RegisterEventHotKey failed: \(status)\n".utf8))
+            AppLog.error("RegisterEventHotKey failed with status \(status)")
             return false
         }
         hotKeyRef = registeredRef
         installEventHandler()
+        AppLog.info("registered (keyCode=\(keyCode) modifiers=\(modifiers))")
         return true
     }
 
@@ -70,12 +71,12 @@ final class GlobalHotkey: NSObject {
         let opaque = Unmanaged.passUnretained(self).toOpaque()
 
         let carbonHandler: EventHandlerUPP = { (_, _, userData) -> OSStatus in
-            FileHandle.standardError.write(Data("[hotkey] carbon event received\n".utf8))
+            AppLog.info("Carbon hotkey event fired")
             guard let userData = userData else { return noErr }
             let manager = Unmanaged<GlobalHotkey>.fromOpaque(userData).takeUnretainedValue()
             // The handler is invoked from the main runloop; dispatch to main if not.
             DispatchQueue.main.async {
-                FileHandle.standardError.write(Data("[hotkey] dispatching to Swift\n".utf8))
+                AppLog.info("dispatching handler to main queue")
                 manager.handler?()
             }
             return noErr
