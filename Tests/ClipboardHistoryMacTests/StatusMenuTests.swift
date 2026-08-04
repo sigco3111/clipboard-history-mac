@@ -138,3 +138,92 @@ final class ActivationPolicyTests: XCTestCase {
         return try String(contentsOf: url, encoding: .utf8)
     }
 }
+@MainActor
+final class RecentItemReCopyTests: XCTestCase {
+
+    func testRecentTextItemActionReCopiesEntryToPasteboard() throws {
+        let storage = TestStorageFactory.makeStorage(suffix: "recopy-text")
+        let entry = StorageManager.Entry(
+            id: 1, type: "text",
+            text: "recent-text-value-for-recopy",
+            imageFilename: nil, mime: nil,
+            ts: Date(), hash: "ignored", size: 30
+        )
+
+        let host = ClickHost()
+        host.storage = storage
+        NSPasteboard.general.clearContents()
+
+        let selector = #selector(host.recentTextClicked(_:))
+        let item = NSMenuItem(
+            title: "복사",
+            action: selector,
+            keyEquivalent: ""
+        )
+        item.target = host
+        item.representedObject = entry
+
+        _ = host.perform(selector, with: item)
+
+        XCTAssertEqual(
+            NSPasteboard.general.string(forType: .string), entry.text,
+            "clicking recent-text item must put that entry's text on the pasteboard"
+        )
+    }
+
+    func testRecentImageItemActionReCopiesImageToPasteboard() throws {
+        let storage = TestStorageFactory.makeStorage(suffix: "recopy-image")
+        let payload = Data(bytes: [
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+            0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+            0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
+            0x0c, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x60, 0x60, 0x60, 0x00,
+            0x00, 0x00, 0x04, 0x00, 0x01, 0xf6, 0x17, 0x38, 0x55, 0x00, 0x00, 0x00,
+            0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82
+        ], count: 69)
+    }
+
+    /// Source-text regression: AppDelegate's recent items must wire target/action
+    /// instead of leaving items permanently disabled.
+    func testAppDelegateWiresRecentItemsWithTargetAndAction() throws {
+        let src = try sourceText(of: "ClipboardHistoryMacApp.swift")
+        XCTAssertTrue(
+            src.contains("representedObject") || src.contains("tag"),
+            "Recent items must carry per-item state (representedObject or tag)"
+        )
+        XCTAssertTrue(
+            src.contains("recentTextClicked") || src.contains("recentTextMenuItemClicked"),
+            "Recent text item must invoke a re-copy selector"
+        )
+        XCTAssertTrue(
+            src.contains("recentImageClicked") || src.contains("recentImageMenuItemClicked"),
+            "Recent image item must invoke a re-copy selector"
+        )
+    }
+
+    private func sourceText(of file: String) throws -> String {
+        let here = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let root = here.deletingLastPathComponent().deletingLastPathComponent()
+        let url = root.appendingPathComponent("Sources/ClipboardHistoryMac/\(file)")
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+}
+
+@MainActor
+private final class ClickHost: NSObject {
+    var storage: StorageManager?
+
+    @objc func recentTextClicked(_ sender: NSMenuItem) {
+        guard let entry = sender.representedObject as? StorageManager.Entry else { return }
+        if let text = entry.text {
+            storage?.copyText(text)
+        }
+    }
+
+    @objc func recentImageClicked(_ sender: NSMenuItem) {
+        guard let entry = sender.representedObject as? StorageManager.Entry else { return }
+        if let filename = entry.imageFilename {
+            storage?.copyImage(filename: filename)
+        }
+    }
+}

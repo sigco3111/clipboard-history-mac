@@ -93,7 +93,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         for _ in 0..<3 {
             let item = NSMenuItem()
-            item.isEnabled = false
+            item.target = self
+            item.action = #selector(recentTextMenuItemClicked(_:))
             item.isHidden = true
             menu.addItem(item)
             self.recentTextItems.append(item)
@@ -109,7 +110,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         for _ in 0..<3 {
             let item = NSMenuItem()
-            item.isEnabled = false
+            item.target = self
+            item.action = #selector(recentImageMenuItemClicked(_:))
             item.isHidden = true
             menu.addItem(item)
             self.recentImageItems.append(item)
@@ -192,20 +194,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             toggleItemRef?.title = "자동 캡처 일시정지"
         }
 
-        // Recent text items
+        // Recent text items — re-copy on click via representedObject + #selector
         let textEntries = storage.entries.filter { $0.type == "text" }.prefix(3)
         for (idx, item) in recentTextItems.enumerated() {
             if idx < textEntries.count {
                 let entry = textEntries[textEntries.count - 1 - idx]
-                item.title = String((entry.text ?? "").prefix(60))
+                let preview = String((entry.text ?? "").prefix(60))
+                item.title = "  " + preview
+                item.representedObject = entry
                 item.isHidden = false
+                item.isEnabled = true
             } else {
+                item.title = ""
+                item.representedObject = nil
                 item.isHidden = true
+                item.isEnabled = false
             }
         }
-        recentTextHeader?.title = textEntries.isEmpty ? "최근 텍스트 (없음)" : "최근 텍스트"
+        recentTextHeader?.title = textEntries.isEmpty ? "최근 텍스트 (없음)" : "최근 텍스트 — 클릭 시 복사"
 
-        // Recent image items — show count only (we don't surface image bytes in menu)
+        // Recent image items — re-copy on click via representedObject + #selector
         let imageEntries = storage.entries.filter { $0.type == "image" }.prefix(3)
         for (idx, item) in recentImageItems.enumerated() {
             if idx < imageEntries.count {
@@ -216,13 +224,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 formatter.timeStyle = .short
                 let timeStr = formatter.string(from: timestamp)
                 let sizeKB = Double(entry.size) / 1024.0
-                item.title = "[\(timeStr)] \(String(format: "%.1f", sizeKB)) KB (\(entry.mime ?? "?"))"
+                item.title = "  [\(timeStr)] \(String(format: "%.1f", sizeKB)) KB (\(entry.mime ?? "?"))"
+                item.representedObject = entry
                 item.isHidden = false
+                item.isEnabled = true
             } else {
+                item.title = ""
+                item.representedObject = nil
                 item.isHidden = true
+                item.isEnabled = false
             }
         }
-        recentImageHeader?.title = imageEntries.isEmpty ? "최근 이미지 (없음)" : "최근 이미지"
+        recentImageHeader?.title = imageEntries.isEmpty ? "최근 이미지 (없음)" : "최근 이미지 — 클릭 시 복사"
+    }
+
+    @objc func recentTextMenuItemClicked(_ sender: NSMenuItem) {
+        guard let entry = sender.representedObject as? StorageManager.Entry,
+              let text = entry.text else { return }
+        storage?.copyText(text)
+    }
+
+    @objc func recentImageMenuItemClicked(_ sender: NSMenuItem) {
+        guard let entry = sender.representedObject as? StorageManager.Entry,
+              let filename = entry.imageFilename else { return }
+        storage?.copyImage(filename: filename)
     }
 
     @objc func openMainWindow(_ sender: Any?) {
