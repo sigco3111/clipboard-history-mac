@@ -169,17 +169,27 @@ struct EntryRow: View {
 
             Spacer()
 
-            // 복사 버튼
-            Button {
-                if entry.type == "text", let text = entry.text {
-                    storage.copyText(text)
-                } else if entry.type == "image", let filename = entry.imageFilename {
-                    storage.copyImage(filename: filename)
+            HStack(spacing: 4) {
+                Button {
+                    if entry.type == "text", let text = entry.text {
+                        storage.copyText(text)
+                    } else if entry.type == "image", let filename = entry.imageFilename {
+                        storage.copyImage(filename: filename)
+                    }
+                } label: {
+                    Image(systemName: "doc.on.doc")
                 }
-            } label: {
-                Image(systemName: "doc.on.doc")
+                .buttonStyle(.borderless)
+                .help("복사")
+
+                Button {
+                    storage.delete(entry)
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("삭제")
             }
-            .buttonStyle(.borderless)
         }
         .padding(.vertical, 4)
     }
